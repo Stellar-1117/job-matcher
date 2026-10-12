@@ -1,0 +1,36 @@
+{
+ "jobPostingInfo": {
+  "id": "036d9ffac68b100074468a40c80b0000",
+  "title": "Senior DFT Engineer",
+  "jobDescription": "<p><span>NVIDIA <span>has continuously reinvented itself over two decades. Our invention of the GPU in 1999 sparked the growth of the PC gaming market, redefined modern computer graphics, and revolutionized parallel computing. More recently, GPU deep learning ignited modern AI — the next era of computing. NVIDIA is a “learning machine” that constantly evolves by adapting to new opportunities that are hard to solve, that only we can tackle, and that matter to the world. <span>This is our life’s work , to amplify human imagination and intelligence.  Make the choice to join us today.</span></span></span></p><p><span> </span></p><p><span>Design-for-Test Engineering at NVIDIA works on groundbreaking innovations involving crafting creative solutions for DFT architecture, verification and post-silicon validation on some of the industry&#39;s most complex semiconductor chips. </span></p><p></p><",
+  "location": "US, CA, Santa Clara",
+  "postedOn": "Posted Today",
+  "startDate": "2026-09-30",
+  "timeType": "Full time",
+  "jobReqId": "JR2000499",
+  "jobPostingId": "Senior-DFT-Engineer_JR2000499",
+  "jobPostingSiteId": "NVIDIAExternalCareerSite",
+  "country": {
+   "descriptor": "United States of America",
+   "id": "bc33aa3152ec42d4995f4791a106ed09"
+  },
+  "canApply": true,
+  "posted": true,
+  "includeResumeParsing": true,
+  "jobRequisitionLocation": {
+   "descriptor": "US, CA, Santa Clara",
+   "country": {
+    "descriptor": "United States of America",
+    "id": "bc33aa3152ec42d4995f4791a106ed09",
+    "alpha2Code": "US"
+   }
+  },
+  "externalUrl": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/Senior-DFT-Engineer_JR2000499",
+  "questionnaireId": "3403860341171001f57d5c603f290000"
+ },
+ "hiringOrganization": {
+  "name": "2100 NVIDIA USA",
+  "url": ""
+ },
+ "userAuthenticated": false
+}

@@ -1,0 +1,51 @@
+appId: local.jobmatcher.app
+productName: Job Matcher
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**/*
+  - package.json
+  # pdfjs-dist's optional canvas polyfill is only needed for rendering; text extraction works without it.
+  - "!node_modules/@napi-rs/**"
+  - "!**/*.map"
+  - "!node_modules/pdfjs-dist/{build,web,image_decoders,types}/**"
+  # Ship only the better-sqlite3 binary for the target platform. (This used to be a win.files list, but a
+  # platform `files` list replaces this one and pulled the whole project — src/, tests/, dist/ — into the asar.)
+  - "!node_modules/better-sqlite3/prebuilds/**"
+  - "node_modules/better-sqlite3/prebuilds/${platform}-${arch}.node"
+asarUnpack:
+  - "**/*.node"
+# Writing the asar-integrity resource would modify the exe (see win.signAndEditExecutable below).
+disableAsarIntegrity: true
+win:
+  # Keep Electron's exe byte-for-byte identical (only renamed). Windows Smart App Control allows
+  # the stock Electron binary by reputation but blocks any modified, unsigned copy — so no icon /
+  # version-resource edits, no fuse flips, no asar-integrity resource.
+  signAndEditExecutable: false
+  target:
+    - nsis
+    - zip
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  artifactName: ${productName}-Setup-${version}.${ext}
+mac:
+  # One build per CPU (no universal app): better-sqlite3 ships a prebuilt binary per platform-arch
+  # and only the target's is packaged (see files above).
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  # No Developer ID certificate: ad-hoc signing ("-") is the minimum Apple Silicon needs to launch the
+  # app. Gatekeeper still blocks it on first open (System Settings → Privacy & Security → Open Anyway).
+  identity: "-"
+  hardenedRuntime: false
+  notarize: false
+  category: public.app-category.productivity
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+npmRebuild: false

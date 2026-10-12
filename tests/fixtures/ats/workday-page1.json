@@ -1,0 +1,52 @@
+{
+ "total": 5,
+ "jobPostings": [
+  {
+   "title": "Senior DFT Engineer",
+   "externalPath": "/job/US-CA-Santa-Clara/Senior-DFT-Engineer_JR2000499",
+   "locationsText": "US, CA, Santa Clara",
+   "postedOn": "Posted Today",
+   "bulletFields": [
+    "JR2000499"
+   ]
+  },
+  {
+   "title": "Senior Technical Program Manager – DFX Engineering",
+   "externalPath": "/job/US-CA-Santa-Clara/Senior-Technical-Program-Manager---DFX-Engineering_JR2025091",
+   "locationsText": "US, CA, Santa Clara",
+   "postedOn": "Posted Yesterday",
+   "bulletFields": [
+    "JR2025091"
+   ]
+  },
+  {
+   "title": "Senior Technical Program Manager – VLSI",
+   "externalPath": "/job/US-CA-Santa-Clara/Senior-Technical-Program-Manager---VLSI_JR2013354",
+   "locationsText": "US, CA, Santa Clara",
+   "postedOn": "Posted 3 Days Ago",
+   "bulletFields": [
+    "JR2013354"
+   ]
+  },
+  {
+   "title": "System Software Engineer - Robotics Simulation",
+   "externalPath": "/job/US-CA-Santa-Clara/System-Software-Engineer---Robotics-Simulation_JR2026819",
+   "locationsText": "US, CA, Santa Clara",
+   "postedOn": "Posted 10 Days Ago",
+   "bulletFields": [
+    "JR2026819"
+   ]
+  },
+  {
+   "title": "Graphics System Software Engineer",
+   "externalPath": "/job/US-CA-Santa-Clara/Graphics-System-Software-Engineer_JR2026351",
+   "locationsText": "2 Locations",
+   "postedOn": "Posted 30+ Days Ago",
+   "bulletFields": [
+    "JR2026351"
+   ]
+  }
+ ],
+ "facets": [],
+ "userAuthenticated": false
+}

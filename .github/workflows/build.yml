@@ -1,0 +1,40 @@
+# Builds the macOS and Windows packages on GitHub's runners (macOS packages can only be built on a Mac).
+# Run it from the Actions tab ("Run workflow") or by pushing a tag like v0.2.0; download the files from
+# the run's "Artifacts" section.
+name: Build
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - name: Package (macOS, arm64 + x64)
+        if: runner.os == 'macOS'
+        run: npm run dist:mac
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: npm run dist:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: job-matcher-${{ runner.os }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*-Setup-*.exe
+          if-no-files-found: error
