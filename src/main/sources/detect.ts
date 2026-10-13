@@ -116,13 +116,5 @@ export function hintsFromUrl(url: string, originalUrl?: string): UrlHints {
       hints.companyName = prettifyToken(m[2]);
     }
   }
-  if (host === 'welcometothejungle.com') {
-    // /en/companies/<company>/jobs/<title>_<city>
-    const m = u.pathname.match(/\/companies\/([^/]+)\/jobs\/([^/?#]+)/);
-    if (m) {
-      hints.companyName = prettifyToken(decodeURIComponent(m[1]));
-      hints.title = prettifyToken(decodeURIComponent(m[2]).replace(/_[^_]*$/, ''));
-    }
-  }
   return hints;
 }

@@ -7,7 +7,6 @@ import { CollectParamsSchema, CompanyInputSchema, type CompanyRow, type DetectRe
 import { AnalyzeParamsSchema, MIN_PASTED_TEXT, type AnalysisRow, type AnalyzeEstimate, type AnalyzeProgress, type UnreadableDomain } from './analysis';
 import { ExportOptionsSchema, JOB_STATUSES, type JobStatus, type ResultDetail, type ResultsList } from './results';
 import type { UsageSummary } from './usage';
-import type { WttjImport, WttjState } from './wttj';
 import { PreferencesSchema, type ParseStatus, type ProfileDetail, type ProfileSummary, type ResumeDetail } from './profile';
 import {
   ModelInputSchema,
@@ -120,12 +119,6 @@ export const ipcContract = {
   'analyze:state': channel<{ active: AnalyzeProgress | null; last: AnalyzeProgress | null }>()(empty),
   'analyze:results': channel<AnalysisRow[]>()(z.object({ runId: id })),
   'analyze:unreadableDomains': channel<UnreadableDomain[]>()(empty),
-
-  'wttj:state': channel<WttjState>()(empty),
-  'wttj:signIn': channel<{ signedIn: boolean }>()(empty),
-  'wttj:signOut': channel<{ ok: true }>()(empty),
-  'wttj:import': channel<WttjImport>()(empty),
-  'wttj:importLinks': channel<WttjImport>()(z.object({ text: z.string().max(2_000_000) })),
 
   'usage:summary': channel<UsageSummary>()(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).nullable() })),
 

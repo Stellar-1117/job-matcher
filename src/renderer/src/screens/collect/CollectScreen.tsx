@@ -6,7 +6,6 @@ import { Badge, Button, Card, ErrorBox, Spinner, Textarea, cx, useAction } from 
 import DateRangePicker from '../../components/DateRangePicker';
 import { ATS_TONES, HealthBadge } from '../settings/CompaniesTab';
 import type { Navigate } from '../../App';
-import WttjCard from './WttjCard';
 
 function SourcesPicker({
   companies,
@@ -229,8 +228,6 @@ export default function CollectScreen({ navigate }: { navigate: Navigate }) {
           <SourcesPicker companies={companies.data ?? []} selected={sel} onChange={setSelected} />
         )}
       </Card>
-
-      <WttjCard navigate={navigate} />
 
       <Card title="Manual links">
         <Textarea

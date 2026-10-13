@@ -11,8 +11,6 @@ import { addLinks, deleteJobs, getJobItem, listJobs } from './repos/jobs';
 import { listNeedsPaste, listRunAnalyses, listUnreadableDomains, resetAllUnreadable, resetFetch, savePastedText } from './repos/analysis';
 import { analyzeState, cancelAnalyze, estimate, resumeAnalyze, startAnalyze } from './runs/analyze';
 import { appEvents } from './events';
-import { importWttjLinks, importWttjMatches, wttjState } from './runs/wttj';
-import { openWttjSignIn, signOutWttj } from './sources/wttj';
 import { exportRows, getResultDetail, listResults, markExported, markOpened, setFeedback, setStatuses } from './repos/results';
 import { buildExport, exportFileName } from '@shared/results';
 import {
@@ -265,15 +263,6 @@ export function registerIpc(dbPath: string): void {
     'analyze:unreadableDomains': () => listUnreadableDomains(),
 
     'usage:summary': ({ month }) => usageSummary(month, getSettings().monthlyBudgetUsd),
-
-    'wttj:state': () => wttjState(),
-    'wttj:signIn': () => openWttjSignIn(),
-    'wttj:signOut': async () => {
-      await signOutWttj();
-      return { ok: true as const };
-    },
-    'wttj:import': () => importWttjMatches(),
-    'wttj:importLinks': ({ text }) => importWttjLinks(text),
 
     'results:list': ({ profileId }) => listResults(profileId),
     'results:detail': ({ analysisId }) => getResultDetail(analysisId),

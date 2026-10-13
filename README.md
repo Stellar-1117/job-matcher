@@ -7,22 +7,13 @@ Local desktop app (Electron + React + TypeScript + SQLite) that collects job pos
 1. **Settings → API keys**: add keys (stored encrypted with the OS keychain via Electron `safeStorage`). Check **Task routing** to pick which model handles each task — tasks marked as containing personal data send your resume to that provider.
 2. **Profiles**: create a profile, upload a resume (PDF/DOCX/TXT), check the parsed result, set hard filters and soft preferences.
 3. **Settings → Companies**: add companies by careers URL (Greenhouse, Lever, Ashby, Workday and iCIMS are detected; anything else is read as a generic page).
-4. **Collect**: pick a date range and sources, paste job-platform links, and collect. Import your **Welcome to the Jungle matches** from the card on this screen (see below).
+4. **Collect**: pick a date range and sources, paste job-platform links, and collect.
 5. **Jobs & Analyze**: one screen to add links, browse saved jobs and analyze them.
    - Pick profiles and which jobs to analyze: a date range by **posted date** or **date added**, or the jobs ticked in the list ("Selected in list"). Check the cost estimate, then run.
    - Each job shows the profiles it was analyzed for, with the score (or "filtered" / "skipped"). Group the list by **Analyzed profiles**, or filter it to jobs analyzed / not analyzed for a profile.
    - Pages the app can't read land in **Needs manual paste**: paste the description, or use **Retry fetching all** after the app learns to read a site.
 6. **Results**: filter, review (opening a row marks it reviewed), set statuses, and export the selection as `.txt` / `.csv` or to the clipboard. The CSV columns are `url, title, company, work_type, location, score, verdict, summary` — title, company and location come from the job description itself, work type is Remote / Hybrid / Onsite.
 7. **Usage**: this month's spend against the budget, by task, model, day and run.
-
-### Welcome to the Jungle matches
-
-Your WTTJ **Matches** page is only visible when signed in, so it can't be added as a company or pasted as a job link (the app refuses both). Two ways to import it, both marking each job **New** or **Already saved** so re-imports never duplicate anything:
-
-- **Sign in… → Import my matches**: sign in once in the app's window with your WTTJ email and password; the session is kept in its own storage, separate from everything else. Google sign-in does **not** work here — Google refuses sign-in inside embedded browsers.
-- **Import from your browser** (for Google accounts): copy the bookmarklet from the card, save it as a bookmark in Chrome, click it on your Matches page — it scrolls through all matches and copies the job links — then paste them into the card.
-
-If a signed-in import finds no jobs, it saves `wttj-import-debug.json` in the app's data folder to help fix the page reader.
 
 ### Keeping LLM costs down
 
@@ -85,13 +76,13 @@ it can't verify the developer: open **System Settings → Privacy & Security** a
 src/shared/     types, Zod schemas (LLM outputs, settings), IPC contract, scoring, taxonomy, date ranges
 src/main/       main process: db/ (migrations), repos/, llm/ (provider adapters + complete()), seed/, ipc.ts
   sources/      job source adapters (greenhouse, lever, ashby, workday, icims, generic), URL normalization, ATS detection,
-                dedupe, dates; site readers (ziprecruiter.ts) and Welcome to the Jungle matches (wttj.ts, wttjLinks.ts)
+                dedupe, dates; site readers (ziprecruiter.ts)
   net/          HTTP client (per-host concurrency, backoff on 429/5xx, timeouts, cancellation); hidden-browser page renderer
                 (bot-check aware)
   analysis/     fetch ladder (ATS API → HTTP/JSON-LD/site readers/Readability → hidden browser → manual paste), closed-posting
                 rules, pipeline steps (extraction, hard filters, pre-score, matching) and the cost estimate
   runs/         background runs (collect, analyze) with progress events, cancel and resume; analyze runs are a
-                persistent queue (run_items) and resume automatically after a restart; WTTJ matches import (wttj.ts)
+                persistent queue (run_items) and resume automatically after a restart
   resume/       resume text extraction (PDF/DOCX/TXT) and background parsing
   repos/        SQLite access; jobs.ts (job list incl. analyzed profiles), results.ts (per-profile results, status, export),
                 usage.ts (Usage screen)

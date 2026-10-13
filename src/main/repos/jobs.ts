@@ -7,7 +7,6 @@ import { ATS_SOURCE_KEYS } from '@shared/collect';
 import { normalizeUrl, splitLinkInput } from '../sources/url';
 import { hintsFromUrl } from '../sources/detect';
 import { dedupeKey, dedupePrefix } from '../sources/dedupe';
-import { isWttjListingPage } from '../sources/wttjLinks';
 import type { PostedAtSource, RawJob } from '../sources/types';
 
 /**
@@ -323,10 +322,6 @@ export function addLinks(text: string): AddLinksResult {
       const n = normalizeUrl(input);
       if (!n.ok) {
         result.invalid.push({ input, reason: n.reason });
-        continue;
-      }
-      if (isWttjListingPage(n.url)) {
-        result.invalid.push({ input, reason: 'a Welcome to the Jungle list page, not a job — use Collect → Welcome to the Jungle matches' });
         continue;
       }
       if (seen.has(n.url)) {

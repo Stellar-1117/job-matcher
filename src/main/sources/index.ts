@@ -9,7 +9,6 @@ import { icimsAdapter } from './adapters/icims';
 import { genericAdapter } from './adapters/generic';
 import type { HttpClient } from '../net/http';
 import type { AdapterKey, SourceAdapter } from './types';
-import { isWttjListingPage } from './wttjLinks';
 
 export const ADAPTERS: Record<AdapterKey, SourceAdapter> = {
   greenhouse: greenhouseAdapter,
@@ -63,7 +62,6 @@ export async function detectCompany(rawUrl: string, http: HttpClient, signal?: A
   const n = normalizeUrl(rawUrl);
   if (!n.ok) throw new Error(n.reason);
   const url = n.url;
-  if (isWttjListingPage(url)) throw new Error('This is a Welcome to the Jungle list page, not a company careers site. Import your matches with Collect → Welcome to the Jungle matches instead.');
   const fromUrl = detectAts(url);
   if (fromUrl) {
     const token = fromUrl.ats === 'workday' ? fromUrl.boardToken.split('/')[0] : fromUrl.ats === 'icims' ? icimsCompanyToken(fromUrl.boardToken) : fromUrl.boardToken;

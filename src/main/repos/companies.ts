@@ -2,8 +2,6 @@ import { bool, getDb } from '../db';
 import type { CompanyInput, CompanyRow, SourceHealthRow } from '@shared/collect';
 import type { CompanyRef } from '../sources/types';
 import { toHealthRow } from './runs';
-import { normalizeUrl } from '../sources/url';
-import { isWttjListingPage } from '../sources/wttjLinks';
 
 export function listCompanies(): CompanyRow[] {
   const db = getDb();
@@ -51,8 +49,6 @@ function findDuplicate(input: CompanyInput, excludeId?: number): string | null {
 }
 
 export function addCompany(input: CompanyInput): number {
-  const n = normalizeUrl(input.careersUrl);
-  if (n.ok && isWttjListingPage(n.url)) throw new Error('This is a Welcome to the Jungle list page, not a company careers site. Import your matches with Collect → Welcome to the Jungle matches instead.');
   const dup = findDuplicate(input);
   if (dup) throw new Error(`"${dup}" already uses this careers board.`);
   const res = getDb()
