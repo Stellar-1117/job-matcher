@@ -56,6 +56,8 @@ export interface JsonLdJobPosting {
   location: string | null;
   descriptionText: string | null;
   employmentType: string | null;
+  /** schema.org jobLocationType TELECOMMUTE, or a job location that says "Remote". */
+  remote: boolean;
   raw: Record<string, unknown>;
 }
 
@@ -127,6 +129,7 @@ export function extractJsonLdJobPostings(html: string, pageUrl: string): JsonLdJ
       location: [...new Set(locs)].join(' / ') || (remote ? 'Remote' : null),
       descriptionText: j.description ? htmlToText(decodeEntities(String(j.description))) : null,
       employmentType: asArray(j.employmentType).map(String).join(', ') || null,
+      remote: remote || locs.some((l) => /\bremote\b/i.test(l)),
       raw: j,
     };
   });

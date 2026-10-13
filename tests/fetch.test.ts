@@ -116,3 +116,29 @@ describe('fetch ladder', () => {
     expect(r.kind === 'unreadable' && r.reason).toMatch(/page: .*· browser: /);
   });
 });
+
+describe('work mode stated outside the description', () => {
+  const wttj = (title: string, extra: Record<string, unknown> = {}) =>
+    `<html><head><title>${title}</title>${jsonLd(extra)}</head><body><main><p>${DESC}</p></main></body></html>`;
+  const URL_ = 'https://welcometothejungle.com/en/companies/acme/jobs/senior-backend-engineer_new-york';
+
+  it("reads Welcome to the Jungle's title tag and puts it on top of the description", async () => {
+    for (const [tag, mode] of [
+      ['Fully-remote', 'Remote'],
+      ['A few days at home', 'Hybrid'],
+      ['Occasional remote', 'Hybrid'],
+      ['No remote work', 'Onsite'],
+    ] as const) {
+      const http = fakeHttp({ [URL_]: wttj(`Senior Backend Engineer · Acme · Permanent contract · ${tag}`) });
+      const r = await fetchDescription(URL_, { http, render: null, now: NOW });
+      expect(r).toMatchObject({ kind: 'text', text: expect.stringMatching(new RegExp(`^Work mode: ${mode}\n\n`)) });
+    }
+  });
+
+  it('uses JSON-LD TELECOMMUTE on any site, and adds nothing when the page says nothing', async () => {
+    const remote = fakeHttp({ 'https://acme.com/jobs/1': page('', jsonLd({ jobLocationType: 'TELECOMMUTE' })) });
+    expect(await fetchDescription('https://acme.com/jobs/1', { http: remote, render: null, now: NOW })).toMatchObject({ text: expect.stringMatching(/^Work mode: Remote/) });
+    const silent = fakeHttp({ 'https://acme.com/jobs/2': page('', jsonLd()) });
+    expect(await fetchDescription('https://acme.com/jobs/2', { http: silent, render: null, now: NOW })).toMatchObject({ text: expect.not.stringMatching(/Work mode/) });
+  });
+});

@@ -93,6 +93,28 @@ export function savePastedText(jobId: number, text: string, now = nowIso()): voi
   })();
 }
 
+/**
+ * Download and read these jobs again on the next analysis (e.g. after the app learned to read more
+ * from a site): description, extraction and tags are cleared; scores stay cached. Jobs whose
+ * description was pasted by hand are left alone. Returns how many were reset.
+ */
+export function refetchJobs(ids: number[], now = nowIso()): number {
+  const db = getDb();
+  let n = 0;
+  db.transaction(() => {
+    const reset = db.prepare(
+      "UPDATE jobs SET description_text = NULL, fetch_status = 'pending', fetch_error = NULL, extraction_id = NULL, updated_at = ? WHERE id = ? AND fetch_status <> 'manual_text' AND is_closed = 0",
+    );
+    for (const id of ids) {
+      if (!reset.run(now, id).changes) continue;
+      n++;
+      db.prepare('DELETE FROM job_extractions WHERE job_id = ?').run(id);
+      db.prepare('DELETE FROM job_tags WHERE job_id = ?').run(id);
+    }
+  })();
+  return n;
+}
+
 /** Put an unreadable job back to "not fetched" so the next analysis tries the fetch ladder again. */
 export function resetFetch(jobId: number): void {
   getDb().prepare("UPDATE jobs SET fetch_status = 'pending', fetch_error = NULL WHERE id = ? AND fetch_status = 'unreadable'").run(jobId);

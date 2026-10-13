@@ -147,8 +147,11 @@ export const ExportOptionsSchema = z.object({
   destination: z.enum(['file', 'clipboard']),
   /** Leave out jobs already exported for this profile. */
   skipExported: z.boolean(),
+  /** Table copied to the clipboard: start with a header row (off = rows only, to append to a sheet). */
+  clipboardHeader: z.boolean().default(false),
 });
 export type ExportOptions = z.infer<typeof ExportOptionsSchema>;
+export type ExportOptionsInput = z.input<typeof ExportOptionsSchema>;
 
 export interface ExportRow {
   url: string;
@@ -190,11 +193,16 @@ function csvCell(v: string | number | null): string {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+/** CSV file columns: company, role, link first (the order of the user's job sheet). */
+export const EXPORT_COLUMNS = ['company', 'role', 'link', 'work_type', 'location', 'score', 'verdict', 'summary'] as const;
+
+const columnValues = (r: ExportRow): (string | number | null)[] => [r.company, r.title, r.url, r.workType, r.location, r.score, r.verdict, r.summary];
+
 /** File/clipboard content. CSV gets a UTF-8 BOM and CRLF line ends so Excel opens it correctly. */
 export function buildExport(rows: ExportRow[], o: Pick<ExportOptions, 'format' | 'include'>): string {
   if (o.format === 'csv') {
-    const lines = [['url', 'title', 'company', 'work_type', 'location', 'score', 'verdict', 'summary'].join(',')];
-    for (const r of rows) lines.push([r.url, r.title, r.company, r.workType, r.location, r.score, r.verdict, r.summary].map(csvCell).join(','));
+    const lines = [EXPORT_COLUMNS.join(',')];
+    for (const r of rows) lines.push(columnValues(r).map(csvCell).join(','));
     return `﻿${lines.join('\r\n')}\r\n`;
   }
   const lines = rows.map((r) => {
@@ -205,6 +213,20 @@ export function buildExport(rows: ExportRow[], o: Pick<ExportOptions, 'format' |
     return parts.join(' | ');
   });
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Clipboard rows laid out like the user's job sheet: Company | Role | Link | Work type | (blank — the
+ * sheet's own dropdown column) | Location. Nothing beyond Location, so columns further right are never
+ * overwritten. Plain tab-separated text: spreadsheets paste one value per cell and keep the sheet's own
+ * formatting and dropdowns (an HTML table would bring its own formatting); URLs become links.
+ */
+export const SHEET_COLUMNS = ['Company', 'Role', 'Link', 'Work type', '', 'Location'] as const;
+
+export function buildClipboardTable(rows: ExportRow[], header: boolean): string {
+  const cell = (v: string | null) => (v == null ? '' : v.replace(/[\t\r\n]+/g, ' ').trim());
+  const body = rows.map((r) => [r.company, r.title, r.url, r.workType, null, r.location].map(cell));
+  return `${[...(header ? [[...SHEET_COLUMNS]] : []), ...body].map((r) => r.join('\t')).join('\n')}\n`;
 }
 
 /** jobs_<profile>_<YYYY-MM-DD>.<ext> with a filesystem-safe profile name. */

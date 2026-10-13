@@ -8,11 +8,11 @@ import { deleteModel, listModels, upsertModel } from './repos/models';
 import { listRoutes, upsertRoute } from './repos/routes';
 import { createPromptVersion, listPrompts, setActivePrompt, updatePromptNotes } from './repos/prompts';
 import { addLinks, deleteJobs, getJobItem, listJobs } from './repos/jobs';
-import { listNeedsPaste, listRunAnalyses, listUnreadableDomains, resetAllUnreadable, resetFetch, savePastedText } from './repos/analysis';
+import { listNeedsPaste, listRunAnalyses, listUnreadableDomains, refetchJobs, resetAllUnreadable, resetFetch, savePastedText } from './repos/analysis';
 import { analyzeState, cancelAnalyze, estimate, resumeAnalyze, startAnalyze } from './runs/analyze';
 import { appEvents } from './events';
 import { exportRows, getResultDetail, listResults, markExported, markOpened, setFeedback, setStatuses } from './repos/results';
-import { buildExport, exportFileName } from '@shared/results';
+import { buildClipboardTable, buildExport, exportFileName } from '@shared/results';
 import {
   createProfile,
   createResume,
@@ -135,6 +135,11 @@ export function registerIpc(dbPath: string): void {
       savePastedText(id, normalizeText(text));
       appEvents.emit('jobs:updated', { count: 1 });
       return getJobItem(id)!;
+    },
+    'jobs:refetch': ({ ids }) => {
+      const reset = refetchJobs(ids);
+      if (reset) appEvents.emit('jobs:updated', { count: reset });
+      return { reset };
     },
     'jobs:retryAllUnreadable': () => {
       const reset = resetAllUnreadable();
@@ -280,7 +285,7 @@ export function registerIpc(dbPath: string): void {
       const content = buildExport(rows, options);
       let path: string | null = null;
       if (options.destination === 'clipboard') {
-        clipboard.writeText(content);
+        await clipboard.writeText(options.format === 'csv' ? buildClipboardTable(rows, options.clipboardHeader) : content);
       } else {
         const win = BrowserWindow.getFocusedWindow();
         const opts = {
