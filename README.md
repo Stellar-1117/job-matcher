@@ -12,7 +12,8 @@ Local desktop app (Electron + React + TypeScript + SQLite) that collects job pos
    - Pick profiles and which jobs to analyze: a date range by **posted date** or **date added**, or the jobs ticked in the list ("Selected in list"). Check the cost estimate, then run.
    - Each job shows the profiles it was analyzed for, with the score (or "filtered" / "skipped"). Group the list by **Analyzed profiles**, or filter it to jobs analyzed / not analyzed for a profile.
    - Pages the app can't read land in **Needs manual paste**: paste the description, or use **Retry fetching all** after the app learns to read a site.
-6. **Results**: filter, review (opening a row marks it reviewed), set statuses, and export the selection as `.txt` / `.csv` or to the clipboard. The CSV columns are `url, title, company, work_type, location, score, verdict, summary` — title, company and location come from the job description itself, work type is Remote / Hybrid / Onsite.
+   - **Re-fetch selected** downloads and reads the ticked jobs again on the next run (e.g. to pick up details the app learned to read later, such as a work mode stated only in the page title). Scores are kept; pasted descriptions are left alone.
+6. **Results**: filter, review (opening a row marks it reviewed), set statuses, and export the selection as `.txt` / `.csv` or to the clipboard. The CSV file columns are `company, role, link, work_type, location, score, verdict, summary` — role, company and location come from the job description itself, work type is Remote / Hybrid / Onsite. **CSV + Copy to clipboard** copies rows laid out for a job sheet — Company | Role | Link | Work type | (blank) | Location — as plain tab-separated text: paste into the first empty Company cell and each value lands in its own column, keeping the sheet's formatting and dropdowns. Tick "Include a header row" for an empty sheet.
 7. **Usage**: this month's spend against the budget, by task, model, day and run.
 
 ### Keeping LLM costs down
@@ -25,7 +26,7 @@ Local desktop app (Electron + React + TypeScript + SQLite) that collects job pos
 
 ### Hard-to-read sites
 
-The fetch ladder is ATS API → plain HTTP (JSON-LD, then Readability) → hidden browser window. The hidden browser uses a user agent that matches its real Chrome engine and waits through bot checks (Cloudflare's "Just a moment…"), reloading once the check's cookie is set. ZipRecruiter has its own page reader, and its expired links (which land on its search page) are marked closed. Pages that still can't be read go to **Needs manual paste**.
+The fetch ladder is ATS API → plain HTTP (JSON-LD, then Readability) → hidden browser window. The hidden browser uses a user agent that matches its real Chrome engine and waits through bot checks (Cloudflare's "Just a moment…"), reloading once the check's cookie is set. A work mode stated outside the description (JSON-LD `TELECOMMUTE`, Welcome to the Jungle's "Fully-remote" / "A few days at home" / "No remote work" title tag) is added on top of the saved description. ZipRecruiter has its own page reader, and its expired links (which land on its search page) are marked closed. Pages that still can't be read go to **Needs manual paste**.
 
 ## Commands
 

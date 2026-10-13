@@ -79,6 +79,7 @@ export const ipcContract = {
   /** Forget an "unreadable" result so the next analysis tries the fetch ladder again. */
   'jobs:retryFetch': channel<JobListItem>()(z.object({ id })),
   'jobs:retryAllUnreadable': channel<{ reset: number }>()(empty),
+  'jobs:refetch': channel<{ reset: number }>()(z.object({ ids: z.array(id).min(1).max(100_000) })),
 
   'profiles:list': channel<ProfileSummary[]>()(empty),
   'profiles:get': channel<ProfileDetail>()(z.object({ id })),

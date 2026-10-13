@@ -3,9 +3,9 @@ import { setupTestDb } from './helpers';
 import { getDb } from '../src/main/db';
 import { getJobItem, listJobs, upsertCollectedJob } from '../src/main/repos/jobs';
 import { createProfile, createResume, saveParseResult } from '../src/main/repos/profiles';
-import { saveExtraction, upsertAnalysis, type AnalysisKey } from '../src/main/repos/analysis';
+import { refetchJobs, savePastedText, saveExtraction, upsertAnalysis, type AnalysisKey } from '../src/main/repos/analysis';
 import { exportRows, getResultDetail, getStatus, listResults, markExported, markOpened, setFeedback, setStatuses } from '../src/main/repos/results';
-import { buildExport, exportFileName, exportWorkType, scoreRow, stripWorkMode } from '../src/shared/results';
+import { buildClipboardTable, buildExport, exportFileName, exportWorkType, scoreRow, stripWorkMode } from '../src/shared/results';
 import { DEFAULT_FILTERS, applyFilters, facetCounts, yearlySalary, type ScoredRow } from '../src/shared/resultFilters';
 import { DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS } from '../src/shared/scoring';
 import type { JobExtraction, MatchResult } from '../src/shared/llm-schemas';
@@ -104,6 +104,20 @@ describe('analyzed profiles on the job list', () => {
   });
 });
 
+describe('re-fetch', () => {
+  it('clears the description and extraction so the next run reads the page again; keeps scores and pasted text', () => {
+    const j = job('Backend Engineer');
+    upsertAnalysis(key(j.jobId), { outcome: 'matched', extractionId: j.extractionId, hard: pass, runId: null, match: match(80, 80) });
+    const pasted = job('Pasted');
+    savePastedText(pasted.jobId, 'a pasted description '.repeat(30));
+    expect(refetchJobs([j.jobId, pasted.jobId])).toBe(1);
+    expect(getDb().prepare('SELECT description_text, fetch_status, extraction_id FROM jobs WHERE id = ?').get(j.jobId)).toEqual({ description_text: null, fetch_status: 'pending', extraction_id: null });
+    expect(getDb().prepare('SELECT COUNT(*) AS c FROM job_extractions WHERE job_id = ?').get(j.jobId)).toEqual({ c: 0 });
+    expect(getDb().prepare('SELECT COUNT(*) AS c FROM analyses WHERE job_id = ?').get(j.jobId)).toEqual({ c: 1 });
+    expect(getDb().prepare('SELECT fetch_status FROM jobs WHERE id = ?').get(pasted.jobId)).toEqual({ fetch_status: 'manual_text' });
+  });
+});
+
 describe('per-profile status', () => {
   it('rejecting a job for profile A leaves it new for profile B', () => {
     const { jobId } = job('Backend Engineer');
@@ -185,9 +199,14 @@ describe('export', () => {
 
   it('csv: header, quoting, BOM', () => {
     const csv = buildExport(rows, { format: 'csv', include: { title: false, company: false, score: false } });
-    expect(csv.startsWith('﻿url,title,company,work_type,location,score,verdict,summary\r\n')).toBe(true);
-    expect(csv).toContain('https://a.com/1,"Backend, Senior","Acme ""A""",Hybrid,"New York, NY",82,strong,"Line one\nline two"\r\n');
-    expect(csv).toContain('https://b.com/2,Platform,Beta,,,,,\r\n');
+    expect(csv.startsWith('﻿company,role,link,work_type,location,score,verdict,summary\r\n')).toBe(true);
+    expect(csv).toContain('"Acme ""A""","Backend, Senior",https://a.com/1,Hybrid,"New York, NY",82,strong,"Line one\nline two"\r\n');
+    expect(csv).toContain('Beta,Platform,https://b.com/2,,,,,\r\n');
+  });
+
+  it('clipboard rows match the job sheet: Company | Role | Link | Work type | (blank) | Location', () => {
+    expect(buildClipboardTable(rows, false)).toBe('Acme "A"\tBackend, Senior\thttps://a.com/1\tHybrid\t\tNew York, NY\nBeta\tPlatform\thttps://b.com/2\t\t\t\n');
+    expect(buildClipboardTable(rows, true).split('\n')[0]).toBe('Company\tRole\tLink\tWork type\t\tLocation');
   });
 
   it('work type and location are separate columns', () => {

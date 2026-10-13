@@ -358,6 +358,21 @@ export default function JobsScreen({ navigate }: { navigate: Navigate }) {
   const selectedIds = useMemo(() => all.filter((j) => sel.selected.has(j.id)).map((j) => j.id), [all, sel.selected]);
   const selectedCount = selectedIds.length;
 
+  const refetch = async (ids: number[]) => {
+    if (!ids.length) return;
+    const ok = await confirm({
+      title: `Re-fetch ${ids.length} job${ids.length === 1 ? '' : 's'}?`,
+      message:
+        'Their pages are downloaded and read again on the next analysis run (a small extraction cost per job, shown in the estimate). Existing scores are kept. Jobs with a pasted description are skipped.',
+      confirmLabel: 'Re-fetch',
+    });
+    if (!ok) return;
+    void action.run(async () => {
+      await invoke('jobs:refetch', { ids });
+      await jobs.reload();
+    });
+  };
+
   const remove = async (ids: number[]) => {
     if (!ids.length) return;
     const ok = await confirm({
@@ -463,6 +478,9 @@ export default function JobsScreen({ navigate }: { navigate: Navigate }) {
               </Button>
               <Button size="sm" variant="danger" disabled={action.busy || !selectedCount} onClick={() => void remove(selectedIds)}>
                 Delete selected
+              </Button>
+              <Button size="sm" disabled={action.busy || !selectedCount} onClick={() => void refetch(selectedIds)} title="Download and read the selected jobs again on the next analysis">
+                Re-fetch selected
               </Button>
             </div>
           </div>
