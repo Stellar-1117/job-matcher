@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { DateRangeSchema } from './settings';
-import type { RunStatus } from './collect';
+import type { RunStatus } from './sources';
 import type { Verdict } from './scoring';
 
 // ---- Run parameters -------------------------------------------------------------------------
@@ -113,7 +113,7 @@ export interface AnalysisRow {
   profileName: string;
   title: string | null;
   companyName: string | null;
-  url: string;
+  url: string | null;
   outcome: 'matched' | 'hard_filter' | 'pre_score_skip';
   total: number | null;
   verdict: Verdict | null;

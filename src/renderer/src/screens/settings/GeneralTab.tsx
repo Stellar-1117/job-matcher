@@ -135,7 +135,7 @@ export default function GeneralTab() {
               )}
             </div>
             <p className="text-xs text-slate-500">
-              Default sources are saved from the Collect screen (“Save as default”); companies are managed in Settings → Companies. A budget of 0 means no cap.
+              A budget of 0 means no cap.
             </p>
           </div>
         </Card>

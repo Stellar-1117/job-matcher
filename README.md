@@ -1,28 +1,20 @@
 # Job Matcher
 
-Local desktop app (Electron + React + TypeScript + SQLite) that collects job postings, analyzes them against resume profiles with LLMs, and exports the best matches. No server, no login, no telemetry.
+Local desktop app (Electron + React + TypeScript + SQLite) that reads job postings from links or pasted descriptions, analyzes them against resume profiles with LLMs, and exports the best matches. No server, no login, no telemetry.
 
 ## Using it
 
 1. **Settings → API keys**: add keys (stored encrypted with the OS keychain via Electron `safeStorage`). Check **Task routing** to pick which model handles each task — tasks marked as containing personal data send your resume to that provider.
 2. **Profiles**: create a profile, upload a resume (PDF/DOCX/TXT), check the parsed result, set hard filters and soft preferences.
-3. **Settings → Companies**: add companies by careers URL (Greenhouse, Lever, Ashby, Workday and iCIMS are detected; anything else is read as a generic page).
-4. **Collect**: pick a date range and sources, paste job-platform links, and collect. Import your **Welcome to the Jungle matches** from the card on this screen (see below).
-5. **Jobs & Analyze**: one screen to add links, browse saved jobs and analyze them.
+3. **Jobs & Analyze**: one screen to add links, browse saved jobs and analyze them.
+   - Pasting links marks the whole paste: new links show **new**, links you already had show **added again** (never saved twice). **Select latest paste** (or tick **Latest paste only**) and analyze with **Selected in list** to run the same batch for another profile — each profile keeps its own score, status and export marks.
    - Pick profiles and which jobs to analyze: a date range by **posted date** or **date added**, or the jobs ticked in the list ("Selected in list"). Check the cost estimate, then run.
    - Each job shows the profiles it was analyzed for, with the score (or "filtered" / "skipped"). Group the list by **Analyzed profiles**, or filter it to jobs analyzed / not analyzed for a profile.
    - Pages the app can't read land in **Needs manual paste**: paste the description, or use **Retry fetching all** after the app learns to read a site.
-6. **Results**: filter, review (opening a row marks it reviewed), set statuses, and export the selection as `.txt` / `.csv` or to the clipboard. The CSV columns are `url, title, company, work_type, location, score, verdict, summary` — title, company and location come from the job description itself, work type is Remote / Hybrid / Onsite.
-7. **Usage**: this month's spend against the budget, by task, model, day and run.
-
-### Welcome to the Jungle matches
-
-Your WTTJ **Matches** page is only visible when signed in, so it can't be added as a company or pasted as a job link (the app refuses both). Two ways to import it, both marking each job **New** or **Already saved** so re-imports never duplicate anything:
-
-- **Sign in… → Import my matches**: sign in once in the app's window with your WTTJ email and password; the session is kept in its own storage, separate from everything else. Google sign-in does **not** work here — Google refuses sign-in inside embedded browsers.
-- **Import from your browser** (for Google accounts): copy the bookmarklet from the card, save it as a bookmark in Chrome, click it on your Matches page — it scrolls through all matches and copies the job links — then paste them into the card.
-
-If a signed-in import finds no jobs, it saves `wttj-import-debug.json` in the app's data folder to help fix the page reader.
+   - **Re-fetch selected** downloads and reads the ticked jobs again on the next run (e.g. to pick up details the app learned to read later, such as a work mode stated only in the page title). Scores are kept; pasted descriptions are left alone.
+4. **Analyze descriptions**: analyze a job from its description text — paste it, or attach a PDF / DOCX / TXT. A link is optional: without one the job is kept by its text (pasting the same description again doesn't make a second job); with one, the text becomes that link's description, so nothing is fetched. Title, company and location are read from the text by the extraction step. Tick the saved descriptions and run the analysis right there; results show up on **Results** like any other job (no link column value for description-only jobs).
+5. **Results**: filter, open a row for its details, set statuses, and export the selection as `.txt` / `.csv` or to the clipboard. The CSV file columns are `company, role, link, work_type, location, score, verdict, summary` — role, company and location come from the job description itself, work type is Remote / Hybrid / Onsite. **CSV + Copy to clipboard** copies rows laid out for a job sheet — Company | Role | Link | Work type | (blank) | Location — as plain tab-separated text: paste into the first empty Company cell and each value lands in its own column, keeping the sheet's formatting and dropdowns. Tick "Include a header row" for an empty sheet.
+6. **Usage**: this month's spend against the budget, by task, model, day and run.
 
 ### Keeping LLM costs down
 
@@ -34,7 +26,7 @@ If a signed-in import finds no jobs, it saves `wttj-import-debug.json` in the ap
 
 ### Hard-to-read sites
 
-The fetch ladder is ATS API → plain HTTP (JSON-LD, then Readability) → hidden browser window. The hidden browser uses a user agent that matches its real Chrome engine and waits through bot checks (Cloudflare's "Just a moment…"), reloading once the check's cookie is set. ZipRecruiter has its own page reader, and its expired links (which land on its search page) are marked closed. Pages that still can't be read go to **Needs manual paste**.
+The fetch ladder is ATS API → plain HTTP (JSON-LD, then Readability) → hidden browser window. The hidden browser uses a user agent that matches its real Chrome engine and waits through bot checks (Cloudflare's "Just a moment…"), reloading once the check's cookie is set. A work mode stated outside the description (JSON-LD `TELECOMMUTE`, Welcome to the Jungle's "Fully-remote" / "A few days at home" / "No remote work" title tag) is added on top of the saved description. ZipRecruiter has its own page reader, and its expired links (which land on its search page) are marked closed. Pages that still can't be read go to **Needs manual paste**.
 
 ## Commands
 
@@ -85,18 +77,19 @@ it can't verify the developer: open **System Settings → Privacy & Security** a
 src/shared/     types, Zod schemas (LLM outputs, settings), IPC contract, scoring, taxonomy, date ranges
 src/main/       main process: db/ (migrations), repos/, llm/ (provider adapters + complete()), seed/, ipc.ts
   sources/      job source adapters (greenhouse, lever, ashby, workday, icims, generic), URL normalization, ATS detection,
-                dedupe, dates; site readers (ziprecruiter.ts) and Welcome to the Jungle matches (wttj.ts, wttjLinks.ts)
+                dedupe, dates; site readers (ziprecruiter.ts)
   net/          HTTP client (per-host concurrency, backoff on 429/5xx, timeouts, cancellation); hidden-browser page renderer
                 (bot-check aware)
   analysis/     fetch ladder (ATS API → HTTP/JSON-LD/site readers/Readability → hidden browser → manual paste), closed-posting
                 rules, pipeline steps (extraction, hard filters, pre-score, matching) and the cost estimate
-  runs/         background runs (collect, analyze) with progress events, cancel and resume; analyze runs are a
-                persistent queue (run_items) and resume automatically after a restart; WTTJ matches import (wttj.ts)
+  runs/         analyze runs (progress events, cancel and resume; a persistent queue in run_items that resumes
+                automatically after a restart) and the background fetch of pasted ATS links
   resume/       resume text extraction (PDF/DOCX/TXT) and background parsing
   repos/        SQLite access; jobs.ts (job list incl. analyzed profiles), results.ts (per-profile results, status, export),
                 usage.ts (Usage screen)
 src/preload/    contextBridge exposing a typed `window.api.invoke/on`
-src/renderer/   React UI (Tailwind; results table on TanStack Table); screens/jobs/ holds Jobs & Analyze
+src/renderer/   React UI (Tailwind; results table on TanStack Table); screens/jobs/ holds Jobs & Analyze,
+                screens/descriptions/ Analyze descriptions
 tests/          vitest unit tests (fixtures/ for ATS responses and site pages)
 ```
 

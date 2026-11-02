@@ -1,5 +1,5 @@
 import { getDb, nowIso } from '../db';
-import type { HealthStatus, RunStatus, SourceHealthRow } from '@shared/collect';
+import type { RunStatus } from '@shared/sources';
 
 export interface RunRow {
   id: number;
@@ -26,23 +26,6 @@ function toRun(r: any): RunRow {
     costUsd: r.cost_usd,
     startedAt: r.started_at,
     finishedAt: r.finished_at,
-  };
-}
-
-export function toHealthRow(h: any): SourceHealthRow {
-  return {
-    id: h.id,
-    runId: h.run_id,
-    sourceKey: h.source_key,
-    companyId: h.company_id,
-    label: h.label,
-    jobsFound: h.jobs_found,
-    jobsInRange: h.jobs_in_range,
-    jobsNew: h.jobs_new,
-    status: h.status,
-    error: h.error,
-    durationMs: h.duration_ms,
-    createdAt: h.created_at,
   };
 }
 
@@ -88,29 +71,4 @@ export function setRunCost(id: number, usd: number): void {
 /** Runs left "running" by a previous app session can't still be running. */
 export function markInterruptedRuns(): number {
   return getDb().prepare("UPDATE runs SET status = 'interrupted', finished_at = ? WHERE status = 'running'").run(nowIso()).changes;
-}
-
-export function addSourceHealth(h: {
-  runId: number;
-  sourceKey: string;
-  companyId: number | null;
-  label: string;
-  jobsFound: number;
-  jobsInRange: number;
-  jobsNew: number;
-  status: HealthStatus;
-  error: string | null;
-  durationMs: number;
-}): SourceHealthRow {
-  const res = getDb()
-    .prepare(
-      `INSERT INTO source_health (run_id, source_key, company_id, label, jobs_found, jobs_in_range, jobs_new, status, error, duration_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(h.runId, h.sourceKey, h.companyId, h.label, h.jobsFound, h.jobsInRange, h.jobsNew, h.status, h.error, h.durationMs);
-  return toHealthRow(getDb().prepare('SELECT * FROM source_health WHERE id = ?').get(Number(res.lastInsertRowid)));
-}
-
-export function listSourceHealth(runId: number): SourceHealthRow[] {
-  return (getDb().prepare('SELECT * FROM source_health WHERE run_id = ? ORDER BY id').all(runId) as any[]).map(toHealthRow);
 }

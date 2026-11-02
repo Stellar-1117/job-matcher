@@ -23,9 +23,18 @@ export interface JobProfileAnalysis {
   verdict: Verdict | null;
 }
 
+/** Source key of jobs saved from a description alone, with no link. */
+export const DESCRIPTION_SOURCE_KEY = 'description';
+
+/** The link to show for a job: none for a description-only job (its stored URL is just a key). */
+export function jobLink(sourceKey: string, canonicalUrl: string): string | null {
+  return sourceKey === DESCRIPTION_SOURCE_KEY ? null : canonicalUrl;
+}
+
 export interface JobListItem {
   id: number;
-  url: string;
+  /** null for a job saved from its description alone. */
+  url: string | null;
   sourceKey: string;
   sourceLabel: string;
   companyId: number | null;
@@ -45,8 +54,21 @@ export interface JobListItem {
   fetchError: string | null;
   /** Other URLs that were merged into this job (dedupe). */
   extraUrls: string[];
+  /** When the link or description was last pasted (new or already saved); null for jobs from older collection runs. */
+  lastAddedAt: string | null;
   /** Profiles this job has been analyzed for, by profile name. */
   analyses: JobProfileAnalysis[];
+}
+
+/** A job waiting for a pasted description, with the profiles it was queued (or analyzed) for. */
+export interface NeedsPasteJob extends JobListItem {
+  profileIds: number[];
+}
+
+export interface AddDescriptionResult {
+  job: JobListItem;
+  /** The description (or its link) was already saved; that job was updated instead. */
+  duplicate: boolean;
 }
 
 export interface AddLinksResult {
@@ -87,6 +109,7 @@ const PLATFORM_LABELS: Record<string, string> = {
 
 /** "greenhouse" → "Greenhouse", "manual:linkedin.com" → "LinkedIn", "manual:foo.com" → "foo.com". */
 export function sourceLabel(sourceKey: string): string {
+  if (sourceKey === DESCRIPTION_SOURCE_KEY) return 'Pasted description';
   if (ATS_LABELS[sourceKey]) return ATS_LABELS[sourceKey];
   const domain = sourceKey.startsWith('manual:') ? sourceKey.slice('manual:'.length) : sourceKey;
   return PLATFORM_LABELS[domain] ?? domain;

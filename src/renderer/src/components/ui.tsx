@@ -4,6 +4,23 @@ export function cx(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(' ');
 }
 
+/** A job's link, or plain text for a job saved from its description alone (it has no link). */
+export function JobLink({ href, className, title, children }: { href: string | null; className?: string; title?: string; children: ReactNode }) {
+  if (!href) {
+    const plain = className?.split(' ').filter((c) => !/^(?:text-indigo-\d+|hover:underline)$/.test(c)).join(' ');
+    return (
+      <span className={cx(plain, 'text-slate-800')} title={title}>
+        {children}
+      </span>
+    );
+  }
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className={className} title={title}>
+      {children}
+    </a>
+  );
+}
+
 type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'dangerSolid' | 'dangerGhost' | 'ghost';
 
 export function Button({

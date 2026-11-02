@@ -26,6 +26,7 @@ export default function ExportDialog({
     include: { title: false, company: false, score: false },
     destination: 'file',
     skipExported: alreadyExported > 0,
+    clipboardHeader: false,
   });
   const action = useAction();
   const count = jobIds.length - (opts.skipExported ? alreadyExported : 0);
@@ -63,8 +64,8 @@ export default function ExportDialog({
             <div className="text-xs text-slate-500">One URL per line</div>
           </button>
           <button type="button" className={radio(opts.format === 'csv')} onClick={() => setOpts({ ...opts, format: 'csv' })}>
-            <div className="font-medium">.csv</div>
-            <div className="text-xs text-slate-500">URL, title, company, location, score, verdict, summary</div>
+            <div className="font-medium">.csv / table</div>
+            <div className="text-xs text-slate-500">Company, role, link, work type, location, score, verdict, summary</div>
           </button>
         </div>
         {opts.format === 'txt' && (
@@ -89,6 +90,15 @@ export default function ExportDialog({
           </button>
         </div>
 
+        {opts.format === 'csv' && opts.destination === 'clipboard' && (
+          <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            Copies rows for your job sheet — Company | Role | Link | Work type | (blank) | Location — one value per cell. Paste with Ctrl+V into the first empty Company cell; the sheet keeps its own formatting and dropdowns.
+            <label className="mt-1.5 flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={opts.clipboardHeader} onChange={(e) => setOpts({ ...opts, clipboardHeader: e.target.checked })} />
+              Include a header row (leave off to add rows under an existing sheet)
+            </label>
+          </div>
+        )}
         {alreadyExported > 0 && (
           <label className="mt-4 flex items-center gap-2 text-sm">
             <input type="checkbox" checked={opts.skipExported} onChange={(e) => setOpts({ ...opts, skipExported: e.target.checked })} />

@@ -2,10 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { setupTestDb } from './helpers';
 import { fakeHttp, fixture } from './fakeHttp';
 import { getDb } from '../src/main/db';
-import { addCompany, listCompanies } from '../src/main/repos/companies';
 import { addLinks, listJobs, upsertCollectedJob } from '../src/main/repos/jobs';
-import { getRun } from '../src/main/repos/runs';
-import { collectState, resumeCollect, startCollect } from '../src/main/runs/collect';
 import { isInRange, parseRelativePosted, resolveDateRange, startOfLocalDay } from '../src/main/sources/dates';
 import { dedupeKey, normalizeCompany, normalizeTitle } from '../src/main/sources/dedupe';
 import { createHttpClient, retryAfterMs } from '../src/main/net/http';
@@ -154,89 +151,5 @@ describe('job merging', () => {
   it('does not insert out-of-range postings', () => {
     expect(upsertCollectedJob(raw({}), { sourceKey: 'greenhouse', companyId: null, now, insertIfNew: false }).outcome).toBe('skipped');
     expect(listJobs()).toHaveLength(0);
-  });
-});
-
-describe('collect run (acceptance: Greenhouse dates + Last 7 days)', () => {
-  const gh = JSON.parse(fixture('greenhouse-list.json'));
-  const http = () =>
-    fakeHttp({
-      [GH_LIST]: fixture('greenhouse-list.json'),
-      [`https://boards-api.greenhouse.io/v1/boards/stripe/jobs/${gh.jobs[3].id}`]: fixture('greenhouse-job.json'),
-      'https://api.lever.co/v0/postings/broken?mode=json': { status: 403, text: 'forbidden' },
-    });
-
-  it('stores only postings inside the window, with first_published dates, and reports source health', async () => {
-    const stripe = addCompany({ name: 'Stripe', careersUrl: 'https://job-boards.greenhouse.io/stripe', atsType: 'greenhouse', boardToken: 'stripe' });
-    const broken = addCompany({ name: 'Broken Co', careersUrl: 'https://jobs.lever.co/broken', atsType: 'lever', boardToken: 'broken' });
-    const { runId, done } = startCollect(
-      { dateRange: { preset: 'last7', from: null, to: null }, companyIds: [stripe, broken], manualLinks: '' },
-      { http: http(), now: () => NOW, concurrency: 2 },
-    );
-    await done;
-
-    const jobs = listJobs();
-    // In the last 7 days: 2026-09-29 and 2026-09-25 (list) + 2026-09-26 (via the single-job endpoint). 2026-09-10 is out.
-    expect(jobs.map((j) => j.postedAt).sort()).toEqual(
-      ['2026-09-25T09:00:00-04:00', '2026-09-26T08:00:00-04:00', '2026-09-29T10:50:29-04:00'].map((d) => new Date(d).toISOString()).sort(),
-    );
-    expect(jobs.every((j) => j.postedAtSource === 'source' && j.companyId === stripe && j.sourceKey === 'greenhouse')).toBe(true);
-    expect(jobs.every((j) => j.firstSeenAt === NOW.toISOString())).toBe(true);
-
-    const state = collectState();
-    expect(state.active).toBeNull();
-    expect(state.last).toMatchObject({ runId, status: 'completed', total: 2, done: 2, failed: 1, jobsNew: 3 });
-    const health = Object.fromEntries(state.last!.health.map((h) => [h.label, h]));
-    expect(health['Stripe (Greenhouse)']).toMatchObject({ status: 'ok', jobsFound: 4, jobsInRange: 3, jobsNew: 3 });
-    expect(health['Broken Co (Lever)']).toMatchObject({ status: 'failed', error: expect.stringMatching(/HTTP 403/) });
-    expect(listCompanies().find((c) => c.id === stripe)).toMatchObject({ jobCount: 3, lastHealth: expect.objectContaining({ status: 'ok' }) });
-
-    // Running again adds nothing new.
-    const second = startCollect({ dateRange: { preset: 'last7', from: null, to: null }, companyIds: [stripe], manualLinks: '' }, { http: http(), now: () => NOW, concurrency: 2 });
-    await second.done;
-    expect(listJobs()).toHaveLength(3);
-    expect(collectState().last!.jobsNew).toBe(0);
-  });
-
-  it('manual links are saved and pasted ATS links are fetched for clean data', async () => {
-    const id = gh.jobs[3].id;
-    const { done } = startCollect(
-      {
-        dateRange: { preset: 'last7', from: null, to: null },
-        companyIds: [],
-        manualLinks: `https://boards.greenhouse.io/stripe/jobs/${id}?gh_src=li\nhttps://jobright.ai/jobs/info/abc?utm_source=x\nhttps://jobright.ai/jobs/info/abc`,
-      },
-      { http: http(), now: () => NOW, concurrency: 2 },
-    );
-    await done;
-    const jobs = listJobs();
-    expect(jobs).toHaveLength(2);
-    const ghJob = jobs.find((j) => j.sourceKey === 'greenhouse')!;
-    expect(ghJob).toMatchObject({ title: gh.jobs[3].title, companyName: 'Stripe', postedAtSource: 'source', hasDescription: true });
-    const h = collectState().last!.health[0];
-    expect(h).toMatchObject({ label: 'Manual links', jobsNew: 2, status: 'ok' });
-    expect(h.error).toMatch(/1 duplicate/);
-  });
-
-  it('resumes an interrupted run, processing only the sources without a result', async () => {
-    const stripe = addCompany({ name: 'Stripe', careersUrl: 'https://job-boards.greenhouse.io/stripe', atsType: 'greenhouse', boardToken: 'stripe' });
-    const broken = addCompany({ name: 'Broken Co', careersUrl: 'https://jobs.lever.co/broken', atsType: 'lever', boardToken: 'broken' });
-    const first = startCollect({ dateRange: { preset: 'last7', from: null, to: null }, companyIds: [broken], manualLinks: '' }, { http: http(), now: () => NOW, concurrency: 1 });
-    await first.done;
-    // Simulate a run that was interrupted after Broken Co, before Stripe.
-    getDb().prepare("UPDATE runs SET status = 'interrupted', params_json = ?, total = 2 WHERE id = ?").run(
-      JSON.stringify({ dateRange: { preset: 'last7', from: null, to: null }, companyIds: [broken, stripe], manualLinks: '' }),
-      first.runId,
-    );
-    const h = http();
-    const resumed = resumeCollect(first.runId, { http: h, now: () => NOW, concurrency: 1 });
-    await resumed.done;
-    expect(h.calls.some((c) => c.url.includes('lever'))).toBe(false);
-    expect(getRun(first.runId)).toMatchObject({ status: 'completed', done: 2 });
-    expect(listJobs()).toHaveLength(3);
-  });
-
-  it('refuses to start with nothing selected', () => {
-    expect(() => startCollect({ dateRange: { preset: 'last7', from: null, to: null }, companyIds: [], manualLinks: ' ' }, { http: http(), now: () => NOW, concurrency: 1 })).toThrow(/Select at least one/);
   });
 });

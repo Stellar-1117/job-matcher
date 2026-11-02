@@ -32,7 +32,7 @@ export interface ResultFilters {
   verdicts: Verdict[];
   /** Empty = all statuses. */
   statuses: JobStatus[];
-  hideReviewedRejected: boolean;
+  hideRejected: boolean;
   hideClosed: boolean;
   showHardFiltered: boolean;
   date: { preset: DateFilterPreset; from: string | null; to: string | null };
@@ -53,7 +53,7 @@ export const DEFAULT_FILTERS: ResultFilters = {
   minScore: 0,
   verdicts: [],
   statuses: [],
-  hideReviewedRejected: false,
+  hideRejected: false,
   hideClosed: true,
   showHardFiltered: false,
   date: { preset: 'any', from: null, to: null },
@@ -142,7 +142,7 @@ export function applyFilters(rows: ScoredRow[], f: ResultFilters, now = new Date
   return rows.filter((r) => {
     if (!f.showHardFiltered && !r.hardFilterPass) return false;
     if (f.hideClosed && r.isClosed) return false;
-    if (f.hideReviewedRejected && (r.status === 'reviewed' || r.status === 'rejected')) return false;
+    if (f.hideRejected && r.status === 'rejected') return false;
     if (statuses.size && !statuses.has(r.status)) return false;
     if (verdicts.size && (!r.verdict || !verdicts.has(r.verdict))) return false;
     if (f.minScore > 0 && (r.total == null || r.total < f.minScore)) return false;
@@ -173,7 +173,7 @@ export function activeFilterCount(f: ResultFilters): number {
   if (f.minScore > 0) n++;
   if (f.verdicts.length) n++;
   if (f.statuses.length) n++;
-  if (f.hideReviewedRejected) n++;
+  if (f.hideRejected) n++;
   if (!f.hideClosed) n++;
   if (f.showHardFiltered) n++;
   if (f.date.preset !== 'any') n++;

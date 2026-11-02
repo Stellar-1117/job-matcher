@@ -110,7 +110,7 @@ export default function FilterSidebar({
 
       <div className="flex flex-col gap-1.5 border-b border-slate-200 pb-3">
         <Toggle checked={filters.hideClosed} onChange={(v) => set('hideClosed', v)} label="Hide closed jobs" />
-        <Toggle checked={filters.hideReviewedRejected} onChange={(v) => set('hideReviewedRejected', v)} label="Hide reviewed / rejected" />
+        <Toggle checked={filters.hideRejected} onChange={(v) => set('hideRejected', v)} label="Hide rejected" />
         <Toggle checked={filters.showHardFiltered} onChange={(v) => set('showHardFiltered', v)} label="Show hard-filter failures" />
       </div>
 

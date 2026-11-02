@@ -1,6 +1,6 @@
 import { getDb, nowIso } from '../db';
 import { StoredJobExtractionSchema } from '@shared/llm-schemas';
-import { sourceLabel } from '@shared/jobs';
+import { jobLink, sourceLabel } from '@shared/jobs';
 import type { Thresholds, Weights } from '@shared/scoring';
 import {
   exportWorkType,
@@ -89,7 +89,7 @@ export function listResults(profileId: number): ResultsList {
       (r): ResultRow => ({
         jobId: r.job_id,
         analysisId: r.id,
-        url: r.canonical_url,
+        url: jobLink(r.source_key, r.canonical_url),
         title: r.title,
         companyName: r.company_name,
         location: r.location_raw,
@@ -174,14 +174,6 @@ export function setStatuses(profileId: number, jobIds: number[], status: JobStat
     for (const id of jobIds) n += stmt.run(id, profileId, status, now).changes;
   })();
   return n;
-}
-
-/** Opening a row: new → reviewed (only from "new"). Returns the resulting status. */
-export function markOpened(profileId: number, jobId: number): JobStatus {
-  const cur = getStatus(profileId, jobId);
-  if (cur !== 'new') return cur;
-  setStatuses(profileId, [jobId], 'reviewed');
-  return 'reviewed';
 }
 
 export function setFeedback(profileId: number, jobId: number, feedback: -1 | 0 | 1, note: string | null): void {

@@ -1,13 +1,12 @@
 import { bool, getDb, nowIso } from '../db';
-import { sourceLabel, type AddLinksResult, type JobListItem, type JobProfileAnalysis } from '@shared/jobs';
+import { jobLink, sourceLabel, type AddLinksResult, type JobListItem, type JobProfileAnalysis } from '@shared/jobs';
 import { computeTotal, computeVerdict } from '@shared/scoring';
 import { subScoresFromJson } from '@shared/results';
 import { getSettings } from './settings';
-import { ATS_SOURCE_KEYS } from '@shared/collect';
+import { ATS_SOURCE_KEYS } from '@shared/sources';
 import { normalizeUrl, splitLinkInput } from '../sources/url';
 import { hintsFromUrl } from '../sources/detect';
 import { dedupeKey, dedupePrefix } from '../sources/dedupe';
-import { isWttjListingPage } from '../sources/wttjLinks';
 import type { PostedAtSource, RawJob } from '../sources/types';
 
 /**
@@ -47,7 +46,7 @@ function analysesByJob(jobId: number | null): Map<number, JobProfileAnalysis[]> 
 function toItem(r: any, extra: string[], analyses: JobProfileAnalysis[]): JobListItem {
   return {
     id: r.id,
-    url: r.canonical_url,
+    url: jobLink(r.source_key, r.canonical_url),
     sourceKey: r.source_key,
     sourceLabel: sourceLabel(r.source_key),
     companyId: r.company_id ?? null,
@@ -64,12 +63,13 @@ function toItem(r: any, extra: string[], analyses: JobProfileAnalysis[]): JobLis
     closedReason: r.closed_reason ?? null,
     fetchError: r.fetch_error ?? null,
     extraUrls: extra,
+    lastAddedAt: r.last_added_at ?? null,
     analyses,
   };
 }
 
 const LIST_COLUMNS = `id, canonical_url, source_key, company_id, company_name, title, location_raw, posted_at, posted_at_source,
-  first_seen_at, last_seen_at, fetch_status, is_closed, closed_reason, fetch_error, (description_text IS NOT NULL AND description_text <> '') AS has_description`;
+  first_seen_at, last_seen_at, last_added_at, fetch_status, is_closed, closed_reason, fetch_error, has_description`;
 
 function extraUrlsByJob(): Map<number, string[]> {
   const rows = getDb().prepare('SELECT job_id, url FROM job_urls ORDER BY id').all() as { job_id: number; url: string }[];
@@ -82,10 +82,12 @@ function extraUrlsByJob(): Map<number, string[]> {
   return map;
 }
 
-export function listJobs(): JobListItem[] {
+/** All jobs, or with `describedOnly` just those whose description was given by hand (pasted or attached). */
+export function listJobs(describedOnly = false): JobListItem[] {
   const extra = extraUrlsByJob();
   const analyses = analysesByJob(null);
-  const rows = getDb().prepare(`SELECT ${LIST_COLUMNS} FROM jobs ORDER BY first_seen_at DESC, id DESC`).all() as any[];
+  const where = describedOnly ? "WHERE fetch_status = 'manual_text'" : '';
+  const rows = getDb().prepare(`SELECT ${LIST_COLUMNS} FROM jobs ${where} ORDER BY first_seen_at DESC, id DESC`).all() as any[];
   return rows.map((r) => toItem(r, extra.get(r.id) ?? [], analyses.get(r.id) ?? []));
 }
 
@@ -317,16 +319,13 @@ export function addLinks(text: string): AddLinksResult {
      VALUES (?, ?, ?, ?, 'first_seen', ?, ?, 'pending', ?)`,
   );
 
+  // One timestamp for the whole paste: new links' first_seen_at equals their last_added_at.
+  const now = nowIso();
   db.transaction(() => {
-    const now = nowIso();
     for (const input of splitLinkInput(text)) {
       const n = normalizeUrl(input);
       if (!n.ok) {
         result.invalid.push({ input, reason: n.reason });
-        continue;
-      }
-      if (isWttjListingPage(n.url)) {
-        result.invalid.push({ input, reason: 'a Welcome to the Jungle list page, not a job — use Collect → Welcome to the Jungle matches' });
         continue;
       }
       if (seen.has(n.url)) {
@@ -363,6 +362,15 @@ export function addLinks(text: string): AddLinksResult {
   // Fix up in-paste duplicates of newly added links so the UI can point at the saved job.
   for (const d of result.duplicates) {
     if (d.jobId == null) d.jobId = findJobIdByUrl(d.url);
+  }
+  // Mark everything in this paste — new and already saved — as the latest batch.
+  const ids = new Set<number>([...result.added.map((j) => j.id), ...result.duplicates.map((d) => d.jobId).filter((id): id is number => id != null)]);
+  if (ids.size) {
+    const mark = db.prepare('UPDATE jobs SET last_added_at = ? WHERE id = ?');
+    db.transaction(() => {
+      for (const id of ids) mark.run(now, id);
+    })();
+    for (const j of result.added) j.lastAddedAt = now;
   }
   return result;
 }

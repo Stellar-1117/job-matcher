@@ -65,6 +65,26 @@ export function assessText(text: string): string | null {
 
 type PageRead = { kind: 'text' | 'closed'; result: FetchResult } | { kind: 'weak'; reason: string };
 
+/**
+ * Work mode a page states outside the description: Welcome to the Jungle puts it in the page title
+ * ("… · Permanent contract · Fully-remote"), and JSON-LD may mark the posting TELECOMMUTE.
+ */
+export function pageWorkMode(html: string, pageUrl: string, jsonLdRemote: boolean): 'Remote' | 'Hybrid' | 'Onsite' | null {
+  let host = '';
+  try {
+    host = new URL(pageUrl).hostname;
+  } catch {
+    // unparsable URL: no site rule
+  }
+  if (/(^|\.)welcometothejungle\.com$/i.test(host)) {
+    const title = cheerio.load(html)('title').first().text();
+    if (/fully[- ]remote|full remote|télétravail total/i.test(title)) return 'Remote';
+    if (/a few days at home|occasional remote|partial remote|télétravail (?:fréquent|occasionnel)/i.test(title)) return 'Hybrid';
+    if (/no remote work|pas de télétravail/i.test(title)) return 'Onsite';
+  }
+  return jsonLdRemote ? 'Remote' : null;
+}
+
 /** Interpret one loaded page (from plain HTTP or the browser). */
 async function readPage(requested: string, page: RenderedPage, via: 'http' | 'browser', now: Date): Promise<PageRead> {
   const label = via === 'http' ? 'page' : 'browser';
@@ -79,7 +99,9 @@ async function readPage(requested: string, page: RenderedPage, via: 'http' | 'br
     if (expiredByValidThrough(posting.validThrough, now)) {
       return { kind: 'closed', result: { kind: 'closed', via, reason: `The posting expired on ${posting.validThrough} (validThrough)` } };
     }
-    const text = posting.descriptionText!;
+    // The work mode often sits outside the description; state it on top so extraction sees it.
+    const mode = pageWorkMode(page.html, page.url, posting.remote);
+    const text = mode ? `Work mode: ${mode}\n\n${posting.descriptionText!}` : posting.descriptionText!;
     const phrase = closedPhrase(text) ?? closedPhrase(bodyText(page.html));
     if (phrase) return { kind: 'closed', result: { kind: 'closed', via, reason: `The page says "${phrase}"` } };
     if (!assessText(text)) {

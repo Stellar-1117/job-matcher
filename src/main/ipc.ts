@@ -8,13 +8,11 @@ import { deleteModel, listModels, upsertModel } from './repos/models';
 import { listRoutes, upsertRoute } from './repos/routes';
 import { createPromptVersion, listPrompts, setActivePrompt, updatePromptNotes } from './repos/prompts';
 import { addLinks, deleteJobs, getJobItem, listJobs } from './repos/jobs';
-import { listNeedsPaste, listRunAnalyses, listUnreadableDomains, resetAllUnreadable, resetFetch, savePastedText } from './repos/analysis';
+import { addDescription, listNeedsPaste, listRunAnalyses, listUnreadableDomains, refetchJobs, resetAllUnreadable, resetFetch, savePastedText } from './repos/analysis';
 import { analyzeState, cancelAnalyze, estimate, resumeAnalyze, startAnalyze } from './runs/analyze';
 import { appEvents } from './events';
-import { importWttjLinks, importWttjMatches, wttjState } from './runs/wttj';
-import { openWttjSignIn, signOutWttj } from './sources/wttj';
-import { exportRows, getResultDetail, listResults, markExported, markOpened, setFeedback, setStatuses } from './repos/results';
-import { buildExport, exportFileName } from '@shared/results';
+import { exportRows, getResultDetail, listResults, markExported, setFeedback, setStatuses } from './repos/results';
+import { buildClipboardTable, buildExport, exportFileName } from '@shared/results';
 import {
   createProfile,
   createResume,
@@ -31,11 +29,9 @@ import {
   setActiveResume,
 } from './repos/profiles';
 import { extractResumeText, normalizeText } from './resume/extract';
-import { addCompany, deleteCompany, getCompanyRef, listCompanies, updateCompany } from './repos/companies';
-import { adapterFor as sourceAdapterFor, detectCompany } from './sources';
 import { getHttp } from './net/http';
-import { ATS_SOURCE_KEYS } from '@shared/collect';
-import { cancelRun, collectState, enrichAtsJobs, resumeCollect, startCollect } from './runs/collect';
+import { ATS_SOURCE_KEYS } from '@shared/sources';
+import { enrichAtsJobs } from './runs/enrich';
 import { cleanParsed, parseResume } from './resume/parse';
 import { adapterFor, runTask } from './llm';
 import { SAMPLE_VARS } from './llm/samples';
@@ -48,6 +44,10 @@ type Handlers = { [C in IpcChannel]: (input: IpcParsedInput<C>) => Promise<IpcOu
 export function registerIpc(dbPath: string): void {
   const handlers: Handlers = {
     'app:info': () => ({ version: app.getVersion(), dbPath, userDataPath: app.getPath('userData') }),
+    'app:copyText': ({ text }) => {
+      clipboard.writeText(text);
+      return { ok: true };
+    },
 
     'settings:get': () => getSettings(),
     'settings:update': (patch) => updateSettings(patch),
@@ -121,6 +121,7 @@ export function registerIpc(dbPath: string): void {
     'prompts:setActive': ({ id }) => listPrompts(setActivePrompt(id)),
 
     'jobs:list': () => listJobs(),
+    'jobs:listDescriptions': () => listJobs(true),
     'jobs:addLinks': ({ text }) => {
       const r = addLinks(text);
       // Greenhouse/Lever/Ashby/Workday links: fetch clean data in the background.
@@ -131,18 +132,33 @@ export function registerIpc(dbPath: string): void {
       }
       return r;
     },
-    'jobs:delete': ({ ids }) => ({ deleted: deleteJobs(ids) }),
+    'jobs:delete': ({ ids }) => {
+      const deleted = deleteJobs(ids);
+      if (deleted) appEvents.emit('jobs:updated', { count: deleted });
+      return { deleted };
+    },
     'jobs:needsPaste': () => listNeedsPaste(),
     'jobs:pasteText': ({ id, text }) => {
       savePastedText(id, normalizeText(text));
       appEvents.emit('jobs:updated', { count: 1 });
       return getJobItem(id)!;
     },
+    'jobs:refetch': ({ ids }) => {
+      const reset = refetchJobs(ids);
+      if (reset) appEvents.emit('jobs:updated', { count: reset });
+      return { reset };
+    },
     'jobs:retryAllUnreadable': () => {
       const reset = resetAllUnreadable();
       if (reset) appEvents.emit('jobs:updated', { count: reset });
       return { reset };
     },
+    'jobs:addDescription': ({ text, url }) => {
+      const r = addDescription(normalizeText(text), url || null);
+      appEvents.emit('jobs:updated', { count: 1 });
+      return r;
+    },
+    'jobs:readDescriptionFile': async ({ fileName, data }) => ({ text: (await extractResumeText(fileName, data)).text }),
     'jobs:retryFetch': ({ id }) => {
       resetFetch(id);
       appEvents.emit('jobs:updated', { count: 1 });
@@ -207,48 +223,6 @@ export function registerIpc(dbPath: string): void {
       return { ok: true };
     },
 
-    'companies:list': () => listCompanies(),
-    'companies:detect': ({ url }) => detectCompany(url, getHttp()),
-    'companies:add': (input) => {
-      addCompany(input);
-      return listCompanies();
-    },
-    'companies:update': ({ id, ...patch }) => {
-      updateCompany(id, patch);
-      return listCompanies();
-    },
-    'companies:deleteMany': ({ ids }) => {
-      for (const cid of ids) deleteCompany(cid);
-      return listCompanies();
-    },
-    'companies:delete': ({ id }) => {
-      deleteCompany(id);
-      return listCompanies();
-    },
-    'companies:test': async ({ id }) => {
-      const company = getCompanyRef(id);
-      if (!company) throw new Error('Company not found');
-      const started = Date.now();
-      const now = new Date();
-      try {
-        const jobs = await sourceAdapterFor(company.atsType).listJobs(company, {
-          http: getHttp(),
-          now,
-          range: { from: new Date(now.getTime() - 30 * 86400_000), to: now },
-        });
-        return { ok: true, jobsFound: jobs.length, sample: jobs.slice(0, 5).map((j) => j.title), error: null, durationMs: Date.now() - started };
-      } catch (e) {
-        return { ok: false, jobsFound: 0, sample: [], error: redactSecrets((e as Error).message), durationMs: Date.now() - started };
-      }
-    },
-
-    'collect:start': (params) => ({ runId: startCollect(params).runId }),
-    'collect:cancel': ({ runId }) => {
-      cancelRun(runId);
-      return { ok: true };
-    },
-    'collect:resume': ({ runId }) => ({ runId: resumeCollect(runId).runId }),
-    'collect:state': () => collectState(),
 
     'analyze:estimate': (params) => estimate(params),
     'analyze:start': ({ params, budgetOverride }) => ({ runId: startAnalyze({ params, budgetOverride }).runId }),
@@ -266,18 +240,8 @@ export function registerIpc(dbPath: string): void {
 
     'usage:summary': ({ month }) => usageSummary(month, getSettings().monthlyBudgetUsd),
 
-    'wttj:state': () => wttjState(),
-    'wttj:signIn': () => openWttjSignIn(),
-    'wttj:signOut': async () => {
-      await signOutWttj();
-      return { ok: true as const };
-    },
-    'wttj:import': () => importWttjMatches(),
-    'wttj:importLinks': ({ text }) => importWttjLinks(text),
-
     'results:list': ({ profileId }) => listResults(profileId),
     'results:detail': ({ analysisId }) => getResultDetail(analysisId),
-    'results:open': ({ profileId, jobId }) => ({ status: markOpened(profileId, jobId) }),
     'results:setStatus': ({ profileId, jobIds, status }) => ({ updated: setStatuses(profileId, jobIds, status) }),
     'results:feedback': ({ profileId, jobId, feedback, note }) => {
       setFeedback(profileId, jobId, feedback, note);
@@ -291,7 +255,7 @@ export function registerIpc(dbPath: string): void {
       const content = buildExport(rows, options);
       let path: string | null = null;
       if (options.destination === 'clipboard') {
-        clipboard.writeText(content);
+        await clipboard.writeText(options.format === 'csv' ? buildClipboardTable(rows, options.clipboardHeader) : content);
       } else {
         const win = BrowserWindow.getFocusedWindow();
         const opts = {

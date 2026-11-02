@@ -5,7 +5,7 @@ import { JOB_STATUSES, JOB_STATUS_LABELS, scoreRow, type JobStatus, type Results
 import { DEFAULT_FILTERS, activeFilterCount, applyFilters, yearlySalary, type ResultFilters, type ScoredRow } from '@shared/resultFilters';
 import { SUB_SCORE_KEYS, SUB_SCORE_LABELS, VERDICT_LABELS } from '@shared/scoring';
 import { invoke, useIpc, useIpcEvent } from '../../api';
-import { Badge, Button, ErrorBox, NumberInput, Select, Spinner, cx, useAction } from '../../components/ui';
+import { Badge, Button, ErrorBox, JobLink, NumberInput, Select, Spinner, cx, useAction } from '../../components/ui';
 import { useConfirm } from '../../components/confirm';
 import { useRowSelection } from '../../hooks/useRowSelection';
 import PostedDate from '../../components/PostedDate';
@@ -38,7 +38,6 @@ function saveProfileId(id: number): void {
 
 const STATUS_TONES: Record<JobStatus, 'slate' | 'indigo' | 'blue' | 'green' | 'amber' | 'red'> = {
   new: 'indigo',
-  reviewed: 'slate',
   selected: 'blue',
   exported: 'green',
   applied: 'green',
@@ -70,6 +69,9 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
   const [filters, setFiltersState] = useState<ResultFilters>(rememberedFilters);
   const [sorting, setSortingState] = useState<SortingState>(rememberedSorting);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // Rows opened since the filters last changed stay listed, so changing a status from the detail
+  // panel (e.g. to Rejected while filtering on New) doesn't make the open row vanish.
+  const [kept, setKept] = useState<Set<number>>(new Set());
   const [threshold, setThreshold] = useState(70);
   const [bulkStatus, setBulkStatus] = useState<JobStatus>('selected');
   const [exporting, setExporting] = useState(false);
@@ -82,6 +84,7 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
   const setFilters = (f: ResultFilters) => {
     rememberedFilters = f;
     setFiltersState(f);
+    setKept(new Set());
   };
   const setSorting = (u: SortingState | ((old: SortingState) => SortingState)) => {
     setSortingState((old) => {
@@ -112,6 +115,7 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
     if (profileId == null) return;
     saveProfileId(profileId);
     setExpanded(new Set());
+    setKept(new Set());
     void load(profileId);
   }, [profileId, load]);
 
@@ -126,7 +130,12 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
   const s = settings.data;
   // Totals and verdicts come from the stored sub-scores and the current weights — no LLM involved.
   const scored = useMemo<ScoredRow[]>(() => (list && s ? list.rows.map((r) => ({ ...r, ...scoreRow(r, s.weights, s.thresholds) })) : []), [list, s]);
-  const visible = useMemo(() => applyFilters(scored, filters), [scored, filters]);
+  const visible = useMemo(() => {
+    const out = applyFilters(scored, filters);
+    if (!kept.size) return out;
+    const shown = new Set(out.map((r) => r.jobId));
+    return [...out, ...scored.filter((r) => kept.has(r.jobId) && !shown.has(r.jobId))];
+  }, [scored, filters, kept]);
   const profileName = profiles.data?.find((p) => p.id === profileId)?.name ?? '';
 
   const patchRows = (ids: number[], patch: Partial<ScoredRow>) => {
@@ -178,11 +187,7 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
       else n.delete(row.jobId);
       return n;
     });
-    // Opening a row marks it reviewed for this profile only.
-    if (open && row.status === 'new' && profileId != null) {
-      patchRows([row.jobId], { status: 'reviewed' });
-      void invoke('results:open', { profileId, jobId: row.jobId }).catch(() => {});
-    }
+    if (open) setKept((k) => new Set(k).add(row.jobId));
   };
 
   const setStatus = (ids: number[], status: JobStatus) =>
@@ -355,7 +360,7 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
           {scored.length > 0 && (
             <>
               <p className="mb-2 text-xs text-slate-500">
-                Click a row for details (marks it reviewed) · drag down the checkboxes to select a run · Shift-click for a range · Ctrl-click a row to toggle it.
+                Click a row for details · drag down the checkboxes to select a run · Shift-click for a range · Ctrl-click a row to toggle it.
               </p>
               <table className="w-full min-w-[880px] table-fixed border-separate border-spacing-0 text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-50">
@@ -438,9 +443,9 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
                           <td className="min-w-0 border-b border-slate-100 p-2">
                             <div className="flex items-start gap-1.5">
                               <span className="mt-0.5 w-3 shrink-0 text-xs text-slate-400">{isOpen ? '▾' : '▸'}</span>
-                              <a href={r.url} target="_blank" rel="noreferrer" className="line-clamp-2 font-medium text-indigo-700 hover:underline" title={`${r.title ?? ''}\n${r.url}`}>
-                                {r.title ?? r.url}
-                              </a>
+                              <JobLink href={r.url} className="line-clamp-2 font-medium text-indigo-700 hover:underline" title={`${r.title ?? ''}\n${r.url ?? 'Saved from its description (no link)'}`}>
+                                {r.title ?? r.url ?? 'Untitled description'}
+                              </JobLink>
                               {isStale(r) && (
                                 <span className="shrink-0 text-amber-600" title={`Scored with ${r.modelName ?? 'another model'} / prompt v${r.promptVersion ?? '?'}; matching now uses ${list?.currentModelName ?? '?'} / v${list?.currentPromptVersion ?? '?'}. Re-analyze to compare like with like.`}>
                                   ⚠
