@@ -65,7 +65,7 @@ export default function ExportDialog({
           </button>
           <button type="button" className={radio(opts.format === 'csv')} onClick={() => setOpts({ ...opts, format: 'csv' })}>
             <div className="font-medium">.csv / table</div>
-            <div className="text-xs text-slate-500">Company, role, link, work type, location, score, verdict, summary</div>
+            <div className="text-xs text-slate-500">Company, role, link, work type, location, resume link, score, verdict, summary</div>
           </button>
         </div>
         {opts.format === 'txt' && (
@@ -92,7 +92,7 @@ export default function ExportDialog({
 
         {opts.format === 'csv' && opts.destination === 'clipboard' && (
           <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            Copies rows for your job sheet — Company | Role | Link | Work type | (blank) | Location — one value per cell. Paste with Ctrl+V into the first empty Company cell; the sheet keeps its own formatting and dropdowns.
+            Copies rows for your job sheet — Company | Role | Link | Work type | (blank) | Location | Resume — one value per cell. Paste with Ctrl+V into the first empty Company cell; the sheet keeps its own formatting and dropdowns. Rows now fill one more column, so whatever is in the column after Location gets overwritten.
             <label className="mt-1.5 flex items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={opts.clipboardHeader} onChange={(e) => setOpts({ ...opts, clipboardHeader: e.target.checked })} />
               Include a header row (leave off to add rows under an existing sheet)

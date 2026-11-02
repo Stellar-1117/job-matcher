@@ -1,20 +1,88 @@
 import { z } from 'zod';
 import type { JobExtraction } from './llm-schemas';
 import type { HardFilterResult } from './hardFilters';
+import type { TaskEstimate } from './analysis';
 import { SUB_SCORE_KEYS, computeTotal, computeVerdict, type SubScoreKey, type Thresholds, type Verdict, type Weights } from './scoring';
 
 // ---- Per job × profile status (§2) ----------------------------------------------------------
 
-export const JOB_STATUSES = ['new', 'selected', 'exported', 'applied', 'rejected'] as const;
+export const JOB_STATUSES = ['new', 'selected', 'tailored', 'exported', 'applied', 'rejected'] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
 export const JOB_STATUS_LABELS: Record<JobStatus, string> = {
   new: 'New',
   selected: 'Selected',
+  tailored: 'Tailored',
   exported: 'Exported',
   applied: 'Applied',
   rejected: 'Rejected',
 };
+
+// ---- Tailored resumes -----------------------------------------------------------------------
+
+export type TailorState = 'queued' | 'running' | 'ready' | 'failed';
+
+/** One tailored resume, without its files. A row can have one per profile that tailored the job. */
+export interface TailoredSummary {
+  jobId: number;
+  profileId: number;
+  profileName: string;
+  state: TailorState;
+  error: string | null;
+  /** A PDF can be downloaded. Stays true while regenerating, and if regenerating fails: the old file is kept until it's replaced. */
+  hasPdf: boolean;
+  changeCount: number;
+  pagesOriginal: number | null;
+  pagesTailored: number | null;
+  /** False when the file came from a resume version that's no longer the profile's active one. */
+  currentResume: boolean;
+  updatedAt: string;
+}
+
+export interface TailoredChange {
+  id: number;
+  before: string;
+  after: string;
+}
+
+/** What the review shows for one tailored resume. */
+export interface TailoredDetail extends TailoredSummary {
+  changes: TailoredChange[];
+  addedSkills: string[];
+  droppedEdits: number;
+  modelName: string | null;
+  promptVersion: number | null;
+  resumeVersion: number | null;
+  costUsd: number;
+}
+
+export interface TailorEstimate {
+  profileName: string;
+  /** Why this profile's resume can't be tailored (e.g. it isn't a DOCX). */
+  resumeProblem: string | null;
+  /** Jobs that would be tailored now. */
+  toTailor: number;
+  /** Already tailored for this profile, or being tailored: skipped. Use Regenerate to redo one. */
+  alreadyTailored: number;
+  /** Not a full match for this profile: skipped. */
+  notMatched: number;
+  task: TaskEstimate;
+  totalUsd: number;
+  monthSpentUsd: number;
+  monthlyBudgetUsd: number;
+  exceedsBudget: boolean;
+}
+
+/** Whether a tailored resume's PDF ran to a different length than the original. */
+export const pageCountChanged = (t: Pick<TailoredSummary, 'pagesOriginal' | 'pagesTailored'>): boolean =>
+  t.pagesOriginal != null && t.pagesTailored != null && t.pagesOriginal !== t.pagesTailored;
+
+/** <profile name>.pdf, safe for the filesystem but otherwise as the user wrote it (spaces, accents). */
+export function resumeFileName(profileName: string): string {
+  // eslint-disable-next-line no-control-regex
+  const safe = profileName.replace(/[<>:"/\\|?*\u0000-\u001F]+/g, ' ').replace(/\s+/g, ' ').replace(/^[\s.]+|[\s.]+$/g, '');
+  return `${safe || 'resume'}.pdf`;
+}
 
 // ---- Results list ---------------------------------------------------------------------------
 
@@ -84,6 +152,8 @@ export interface ResultRow {
   /** False when the analysis was made with an older resume version. */
   currentResume: boolean;
   analyzedAt: string;
+  /** Tailored resumes for this job, across all profiles. */
+  tailored: TailoredSummary[];
 }
 
 export interface ResultsList {
@@ -160,6 +230,8 @@ export interface ExportRow {
   /** Remote | Hybrid | Onsite, or null when unknown. */
   workType: string | null;
   location: string | null;
+  /** Link to this profile's tailored resume for the job, when there is one. */
+  resumeLink: string | null;
   score: number | null;
   verdict: Verdict | null;
   summary: string | null;
@@ -194,9 +266,9 @@ function csvCell(v: string | number | null): string {
 }
 
 /** CSV file columns: company, role, link first (the order of the user's job sheet). */
-export const EXPORT_COLUMNS = ['company', 'role', 'link', 'work_type', 'location', 'score', 'verdict', 'summary'] as const;
+export const EXPORT_COLUMNS = ['company', 'role', 'link', 'work_type', 'location', 'resume_link', 'score', 'verdict', 'summary'] as const;
 
-const columnValues = (r: ExportRow): (string | number | null)[] => [r.company, r.title, r.url, r.workType, r.location, r.score, r.verdict, r.summary];
+const columnValues = (r: ExportRow): (string | number | null)[] => [r.company, r.title, r.url, r.workType, r.location, r.resumeLink, r.score, r.verdict, r.summary];
 
 /** File/clipboard content. CSV gets a UTF-8 BOM and CRLF line ends so Excel opens it correctly. */
 export function buildExport(rows: ExportRow[], o: Pick<ExportOptions, 'format' | 'include'>): string {
@@ -217,15 +289,15 @@ export function buildExport(rows: ExportRow[], o: Pick<ExportOptions, 'format' |
 
 /**
  * Clipboard rows laid out like the user's job sheet: Company | Role | Link | Work type | (blank — the
- * sheet's own dropdown column) | Location. Nothing beyond Location, so columns further right are never
- * overwritten. Plain tab-separated text: spreadsheets paste one value per cell and keep the sheet's own
+ * sheet's own dropdown column) | Location | Resume. Nothing beyond Resume, so columns further right are
+ * never overwritten. Plain tab-separated text: spreadsheets paste one value per cell and keep the sheet's own
  * formatting and dropdowns (an HTML table would bring its own formatting); URLs become links.
  */
-export const SHEET_COLUMNS = ['Company', 'Role', 'Link', 'Work type', '', 'Location'] as const;
+export const SHEET_COLUMNS = ['Company', 'Role', 'Link', 'Work type', '', 'Location', 'Resume'] as const;
 
 export function buildClipboardTable(rows: ExportRow[], header: boolean): string {
   const cell = (v: string | null) => (v == null ? '' : v.replace(/[\t\r\n]+/g, ' ').trim());
-  const body = rows.map((r) => [r.company, r.title, r.url, r.workType, null, r.location].map(cell));
+  const body = rows.map((r) => [r.company, r.title, r.url, r.workType, null, r.location, r.resumeLink].map(cell));
   return `${[...(header ? [[...SHEET_COLUMNS]] : []), ...body].map((r) => r.join('\t')).join('\n')}\n`;
 }
 

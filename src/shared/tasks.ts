@@ -1,4 +1,4 @@
-export const TASKS = ['job_extraction', 'closed_check', 'pre_score', 'resume_parse', 'matching'] as const;
+export const TASKS = ['job_extraction', 'closed_check', 'pre_score', 'resume_parse', 'matching', 'resume_tailor'] as const;
 export type TaskKey = (typeof TASKS)[number];
 
 export interface TaskMeta {
@@ -54,6 +54,14 @@ export const TASK_META: Record<TaskKey, TaskMeta> = {
     maxOutputTokens: 6000,
     variables: ['profile_structured', 'soft_preferences', 'resume_text', 'job_fields', 'job_text', 'output_schema'],
   },
+  resume_tailor: {
+    key: 'resume_tailor',
+    label: 'Resume tailoring',
+    description: 'Rewrite the experience bullets and tech skills of a resume for one job (only when you click Tailor resume).',
+    personalData: true,
+    maxOutputTokens: 6000,
+    variables: ['resume_paragraphs', 'job_text', 'output_schema'],
+  },
 };
 
 /** All variables a prompt template may reference. */
@@ -61,6 +69,7 @@ export const TEMPLATE_VARIABLES = [
   'job_text',
   'job_fields',
   'resume_text',
+  'resume_paragraphs',
   'profile_structured',
   'soft_preferences',
   'taxonomy',

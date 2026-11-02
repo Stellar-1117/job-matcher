@@ -383,6 +383,39 @@ export const MIGRATIONS: Migration[] = [
       db.exec("UPDATE job_profile_status SET status = 'new' WHERE status = 'reviewed'");
     },
   },
+  {
+    id: 10,
+    name: 'tailored_resumes',
+    up: (db) => {
+      // One tailored resume per job × profile. The token is the file's public link, so regenerating keeps it.
+      db.exec(`
+        CREATE TABLE tailored_resumes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+          profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+          resume_id INTEGER REFERENCES resumes(id) ON DELETE SET NULL,
+          state TEXT NOT NULL DEFAULT 'queued',
+          error TEXT,
+          token TEXT NOT NULL UNIQUE,
+          edits_json TEXT,
+          added_skills_json TEXT,
+          dropped_edits INTEGER NOT NULL DEFAULT 0,
+          docx_blob BLOB,
+          pdf_blob BLOB,
+          pages_original INTEGER,
+          pages_tailored INTEGER,
+          prompt_version_id INTEGER,
+          model_id INTEGER,
+          model_name TEXT,
+          cost_usd REAL NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          UNIQUE (job_id, profile_id)
+        );
+        CREATE INDEX idx_tailored_profile ON tailored_resumes(profile_id);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database, migrations: Migration[] = MIGRATIONS): number[] {

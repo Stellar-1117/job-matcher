@@ -14,6 +14,7 @@ const DEFAULT_ROUTES: Record<TaskKey, { model: string; thinking: boolean; effort
   pre_score: { model: 'GPT-5.6 Luna', thinking: false, effort: null },
   resume_parse: { model: 'Claude Sonnet 5', thinking: false, effort: null },
   matching: { model: 'Claude Sonnet 5', thinking: true, effort: 'low' },
+  resume_tailor: { model: 'DeepSeek Pro', thinking: false, effort: null },
 };
 const DEFAULT_FALLBACK = 'Claude Haiku 4.5';
 

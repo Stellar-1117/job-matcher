@@ -5,7 +5,7 @@ import { getResume, getResumeFile, saveParseResult, setParseStatus } from '../re
 
 const inFlight = new Set<number>();
 
-function cleanList(items: string[]): string[] {
+export function cleanList(items: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const raw of items) {

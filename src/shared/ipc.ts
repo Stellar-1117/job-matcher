@@ -4,7 +4,7 @@ import { AppSettingsSchema, type AppSettings } from './settings';
 import type { AddDescriptionResult, AddLinksResult, JobListItem, NeedsPasteJob } from './jobs';
 import { ResumeParsedSchema } from './llm-schemas';
 import { AnalyzeParamsSchema, MIN_PASTED_TEXT, type AnalysisRow, type AnalyzeEstimate, type AnalyzeProgress, type UnreadableDomain } from './analysis';
-import { ExportOptionsSchema, JOB_STATUSES, type ResultDetail, type ResultsList } from './results';
+import { ExportOptionsSchema, JOB_STATUSES, type JobStatus, type ResultDetail, type ResultsList, type TailoredDetail, type TailoredSummary, type TailorEstimate } from './results';
 import type { UsageSummary } from './usage';
 import { PreferencesSchema, type ParseStatus, type ProfileDetail, type ProfileSummary, type ResumeDetail } from './profile';
 import {
@@ -131,6 +131,16 @@ export const ipcContract = {
   'results:export': channel<{ exported: number; skipped: number; path: string | null; cancelled: boolean }>()(
     z.object({ profileId: id, jobIds: z.array(id).min(1).max(100_000), options: ExportOptionsSchema }),
   ),
+
+  'tailor:estimate': channel<TailorEstimate>()(z.object({ profileId: id, jobIds: z.array(id).min(1).max(100_000) })),
+  'tailor:start': channel<{ started: number }>()(z.object({ profileId: id, jobIds: z.array(id).min(1).max(100_000), budgetOverride: z.boolean().default(false) })),
+  /** Tailor one job again (also the Retry after a failure). The file is replaced and its link stays the same. */
+  'tailor:regenerate': channel<{ ok: true }>()(z.object({ profileId: id, jobId: id })),
+  'tailor:download': channel<{ path: string | null; cancelled: boolean }>()(z.object({ profileId: id, jobId: id })),
+  'tailor:link': channel<{ link: string }>()(z.object({ profileId: id, jobId: id })),
+  'tailor:changes': channel<TailoredDetail | null>()(z.object({ profileId: id, jobId: id })),
+  /** The resume link server: its current address, or why it isn't running. */
+  'tailor:server': channel<{ listening: boolean; address: string; error: string | null }>()(empty),
 } as const;
 
 export type IpcContract = typeof ipcContract;
@@ -145,6 +155,8 @@ export interface IpcEvents {
   'resume:updated': { resumeId: number; profileId: number; status: ParseStatus };
   'analyze:progress': AnalyzeProgress;
   'jobs:updated': { count: number };
+  /** One tailored resume changed state; `status` is the job's status for that profile when the change affected it. */
+  'tailor:progress': { summary: TailoredSummary; status: JobStatus | null };
 }
 export type IpcEventName = keyof IpcEvents;
 

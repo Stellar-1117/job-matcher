@@ -4,6 +4,8 @@ import { openDb, closeDb } from './db';
 import { setSecretCipher } from './repos/keys';
 import { seedDatabase } from './seed';
 import { failInterruptedParses } from './repos/profiles';
+import { failInterruptedTailors } from './repos/tailored';
+import { startResumeServer, stopResumeServer } from './net/resumeServer';
 import { markInterruptedRuns, runningRunIds } from './repos/runs';
 import { resumeAnalyze, setDefaultRenderer } from './runs/analyze';
 import { renderPage } from './net/browser';
@@ -12,7 +14,7 @@ import { appEvents } from './events';
 import type { IpcEventName } from '@shared/ipc';
 import { redactSecrets } from './redact';
 
-const FORWARDED_EVENTS: IpcEventName[] = ['usage:logged', 'resume:updated', 'analyze:progress', 'jobs:updated'];
+const FORWARDED_EVENTS: IpcEventName[] = ['usage:logged', 'resume:updated', 'analyze:progress', 'jobs:updated', 'tailor:progress'];
 
 /** App windows (not the hidden fetch windows of the analysis fetch ladder), which receive push events. */
 const appWindows = new Set<BrowserWindow>();
@@ -72,11 +74,13 @@ app.whenReady().then(() => {
   openDb(dbPath);
   seedDatabase();
   failInterruptedParses();
+  failInterruptedTailors();
   // Analyses that were running when the app closed are resumed automatically (§5).
   const unfinishedAnalysis = runningRunIds('analyze').at(-1);
   markInterruptedRuns();
   setDefaultRenderer(renderPage);
   registerIpc(dbPath);
+  void startResumeServer();
 
   for (const name of FORWARDED_EVENTS) {
     appEvents.on(name, (payload) => {
@@ -102,4 +106,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('will-quit', () => closeDb());
+app.on('will-quit', () => {
+  void stopResumeServer();
+  closeDb();
+});

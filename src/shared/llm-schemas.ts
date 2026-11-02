@@ -126,12 +126,23 @@ export const MatchResultSchema = z.object({
 });
 export type MatchResult = z.infer<typeof MatchResultSchema>;
 
+export const ResumeTailorSchema = z.object({
+  // Not used by the app: asking for it first makes the model work out the job before it edits.
+  job_needs: strList.default([]).describe("The 5 to 8 things this job wants most, in the posting's own words"),
+  edits: z
+    .array(z.object({ id: z.number().int().describe('The number in brackets before the paragraph'), text: z.string().describe('The full new paragraph, with **bold** markers') }))
+    .describe('Only the paragraphs you changed'),
+  added_skills: strList.describe('Skills you added that the resume did not already name; empty if none'),
+});
+export type ResumeTailor = z.infer<typeof ResumeTailorSchema>;
+
 export const TASK_SCHEMAS = {
   job_extraction: JobExtractionSchema,
   closed_check: ClosedCheckSchema,
   pre_score: PreScoreSchema,
   resume_parse: ResumeParsedSchema,
   matching: MatchResultSchema,
+  resume_tailor: ResumeTailorSchema,
 } satisfies Record<TaskKey, z.ZodType>;
 
 export type TaskOutput<T extends TaskKey> = z.infer<(typeof TASK_SCHEMAS)[T]>;

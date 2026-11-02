@@ -40,4 +40,14 @@ export const SAMPLE_VARS: Record<TaskKey, TemplateVars> = {
     job_fields: SAMPLE_FIELDS,
     job_text: SAMPLE_JOB,
   },
+  resume_tailor: {
+    resume_paragraphs: `[locked] Jordan Lee
+[locked] EXPERIENCE
+[locked] Backend Engineer | PayFlow | 2019 - Present
+[3, max 72 chars] Built a **ledger service** in Go handling 2M transactions a day.
+[4, max 60 chars] Led the migration of core services to **Kubernetes**.
+[locked] SKILLS
+[6, max 33 chars] Languages : Python, Go, SQL`,
+    job_text: SAMPLE_JOB,
+  },
 };

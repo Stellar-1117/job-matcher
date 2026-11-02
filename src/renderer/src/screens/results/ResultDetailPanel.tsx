@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { ResultDetail, ResultsList, JobStatus } from '@shared/results';
-import { JOB_STATUSES, JOB_STATUS_LABELS } from '@shared/results';
+import type { ResultDetail, ResultsList, JobStatus, TailoredDetail } from '@shared/results';
+import { JOB_STATUSES, JOB_STATUS_LABELS, pageCountChanged } from '@shared/results';
 import { SUB_SCORE_KEYS, SUB_SCORE_LABELS, type Weights } from '@shared/scoring';
 import type { ScoredRow } from '@shared/resultFilters';
 import { invoke } from '../../api';
@@ -28,21 +28,110 @@ function Field({ label, value }: { label: string; value: string | number | null 
   );
 }
 
+/** `**bold**` markers as actual bold, for the old and new text of a change. */
+function MarkedText({ text }: { text: string }) {
+  return (
+    <>
+      {text.split('**').map((part, i) => (i % 2 === 1 ? <strong key={i}>{part}</strong> : <span key={i}>{part}</span>))}
+    </>
+  );
+}
+
+/** Review of one tailored resume: what changed, what was added, and how it was made. */
+function TailoredSection({ row, profileId, onRegenerate }: { row: ScoredRow; profileId: number; onRegenerate: (jobId: number, profileId: number) => void }) {
+  const summary = row.tailored.find((t) => t.profileId === profileId);
+  const [detail, setDetail] = useState<TailoredDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!summary) return;
+    let stale = false;
+    invoke('tailor:changes', { profileId, jobId: row.jobId })
+      .then((d) => !stale && setDetail(d))
+      .catch((e) => !stale && setError((e as Error).message));
+    return () => {
+      stale = true;
+    };
+  }, [profileId, row.jobId, summary?.updatedAt, summary?.state]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!summary) return null;
+  const busy = summary.state === 'queued' || summary.state === 'running';
+  return (
+    <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Tailored resume</div>
+        {busy && <Spinner />}
+        <Button size="sm" disabled={busy} onClick={() => onRegenerate(row.jobId, profileId)} title="Tailor this resume again (costs one LLM call). The link stays the same.">
+          Regenerate
+        </Button>
+        {detail && (
+          <span className="ml-auto text-[11px] text-slate-500">
+            {detail.modelName ?? 'Unknown model'} · tailoring prompt v{detail.promptVersion ?? '?'} · resume v{detail.resumeVersion ?? '?'} · {new Date(detail.updatedAt).toLocaleString()}
+            {detail.costUsd > 0 && ` · $${detail.costUsd.toFixed(4)}`}
+          </span>
+        )}
+      </div>
+      <ErrorBox error={error} />
+      {summary.state === 'failed' && <div className="mt-1 text-xs text-red-700">{summary.error}</div>}
+      {detail && (
+        <div className="mt-2 flex flex-col gap-2 text-xs">
+          {pageCountChanged(detail) && (
+            <div className="text-amber-800">
+              ⚠ The PDF has {detail.pagesTailored} page{detail.pagesTailored === 1 ? '' : 's'}; the original has {detail.pagesOriginal}.
+            </div>
+          )}
+          {!detail.currentResume && <div className="text-amber-800">⚠ Made from an older resume version. Regenerate to use the current one.</div>}
+          {detail.state === 'ready' && detail.changes.length === 0 && detail.droppedEdits > 0 && (
+            <div className="text-amber-800">⚠ Every edit the model proposed was refused (locked text, too long, or a number the original doesn't have), so this PDF matches the original. Regenerate to try again.</div>
+          )}
+          {detail.changes.length > 0 && detail.droppedEdits > 0 && (
+            <div className="text-slate-600">
+              {detail.droppedEdits} proposed edit{detail.droppedEdits === 1 ? ' was' : 's were'} refused (locked text, too long, or a number the original doesn't have), so the original text stayed there.
+            </div>
+          )}
+          {detail.addedSkills.length > 0 && (
+            <div>
+              <span className="font-medium text-amber-800">Added skills: </span>
+              <span className="text-slate-800">{detail.addedSkills.join(', ')}</span>
+            </div>
+          )}
+          {detail.state === 'ready' && detail.changes.length === 0 && detail.droppedEdits === 0 && <div className="text-slate-600">The model didn't change anything: this PDF matches the original.</div>}
+          {detail.changes.map((c) => (
+            <div key={c.id} className="grid grid-cols-1 gap-2 border-t border-slate-100 pt-2 xl:grid-cols-2">
+              <div className="text-slate-500">
+                <MarkedText text={c.before} />
+              </div>
+              <div className="text-slate-900">
+                <MarkedText text={c.after} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ResultDetailPanel({
   row,
   list,
   weights,
   feedbackEnabled,
+  tailorProfileId,
   onStatus,
   onReanalyze,
+  onRegenerate,
   onFeedback,
 }: {
   row: ScoredRow;
   list: ResultsList;
   weights: Weights;
   feedbackEnabled: boolean;
+  /** The profile whose tailored resume to review (the one picked in the row's dropdown). */
+  tailorProfileId: number;
   onStatus: (s: JobStatus) => void;
   onReanalyze: () => void;
+  onRegenerate: (jobId: number, profileId: number) => void;
   onFeedback: (feedback: -1 | 0 | 1, note: string | null) => void;
 }) {
   const [detail, setDetail] = useState<ResultDetail | null>(null);
@@ -130,6 +219,7 @@ export default function ResultDetailPanel({
             </div>
           )}
           {row.isClosed && <div className="text-xs text-red-700">Closed: {row.closedReason}</div>}
+          <TailoredSection row={row} profileId={tailorProfileId} onRegenerate={onRegenerate} />
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_1fr]">
             <div className="flex flex-col gap-3">
