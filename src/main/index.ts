@@ -12,7 +12,7 @@ import { appEvents } from './events';
 import type { IpcEventName } from '@shared/ipc';
 import { redactSecrets } from './redact';
 
-const FORWARDED_EVENTS: IpcEventName[] = ['usage:logged', 'resume:updated', 'run:progress', 'analyze:progress', 'jobs:updated'];
+const FORWARDED_EVENTS: IpcEventName[] = ['usage:logged', 'resume:updated', 'analyze:progress', 'jobs:updated'];
 
 /** App windows (not the hidden fetch windows of the analysis fetch ladder), which receive push events. */
 const appWindows = new Set<BrowserWindow>();
@@ -72,7 +72,7 @@ app.whenReady().then(() => {
   openDb(dbPath);
   seedDatabase();
   failInterruptedParses();
-  // Analyses that were running when the app closed are resumed automatically (§5); collections wait for "Resume".
+  // Analyses that were running when the app closed are resumed automatically (§5).
   const unfinishedAnalysis = runningRunIds('analyze').at(-1);
   markInterruptedRuns();
   setDefaultRenderer(renderPage);

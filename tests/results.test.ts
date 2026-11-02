@@ -4,7 +4,7 @@ import { getDb } from '../src/main/db';
 import { getJobItem, listJobs, upsertCollectedJob } from '../src/main/repos/jobs';
 import { createProfile, createResume, saveParseResult } from '../src/main/repos/profiles';
 import { refetchJobs, savePastedText, saveExtraction, upsertAnalysis, type AnalysisKey } from '../src/main/repos/analysis';
-import { exportRows, getResultDetail, getStatus, listResults, markExported, markOpened, setFeedback, setStatuses } from '../src/main/repos/results';
+import { exportRows, getResultDetail, getStatus, listResults, markExported, setFeedback, setStatuses } from '../src/main/repos/results';
 import { buildClipboardTable, buildExport, exportFileName, exportWorkType, scoreRow, stripWorkMode } from '../src/shared/results';
 import { DEFAULT_FILTERS, applyFilters, facetCounts, yearlySalary, type ScoredRow } from '../src/shared/resultFilters';
 import { DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS } from '../src/shared/scoring';
@@ -124,14 +124,6 @@ describe('per-profile status', () => {
     expect(getStatus(a, jobId)).toBe('new');
     setStatuses(a, [jobId], 'rejected');
     expect(getStatus(a, jobId)).toBe('rejected');
-    expect(getStatus(b, jobId)).toBe('new');
-  });
-
-  it('opening a row moves new → reviewed only', () => {
-    const { jobId } = job('Backend Engineer');
-    expect(markOpened(a, jobId)).toBe('reviewed');
-    setStatuses(a, [jobId], 'applied');
-    expect(markOpened(a, jobId)).toBe('applied');
     expect(getStatus(b, jobId)).toBe('new');
   });
 
@@ -307,7 +299,7 @@ describe('result filters', () => {
   it('score, verdict, status, date, facets, salary, search', () => {
     expect(ids({ minScore: 70 })).toEqual([1, 5]);
     expect(ids({ verdicts: ['stretch'] })).toEqual([2]);
-    expect(ids({ hideReviewedRejected: true })).toEqual([1, 5]);
+    expect(ids({ hideRejected: true })).toEqual([1, 5]);
     expect(ids({ date: { preset: 'last7', from: null, to: null } })).toEqual([1, 2]);
     expect(ids({ facets: { work_mode: ['onsite'] } })).toEqual([2]);
     expect(ids({ facets: { tech_stack: ['Go'], work_mode: ['Remote'] } })).toEqual([1, 5]);

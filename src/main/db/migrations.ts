@@ -348,6 +348,41 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: 7,
+    name: 'jobs_last_added_at',
+    up: (db) => {
+      // When a link was last pasted — set for new links and for links that were already saved, so the
+      // latest paste can be picked out as a batch (e.g. to analyze it for another profile).
+      db.exec('ALTER TABLE jobs ADD COLUMN last_added_at TEXT');
+    },
+  },
+  {
+    id: 8,
+    name: 'jobs_has_description',
+    up: (db) => {
+      // Lists only need to know whether a description exists; computing that from description_text
+      // reads every job's full text. Triggers keep the flag in step with every write.
+      db.exec(`
+        ALTER TABLE jobs ADD COLUMN has_description INTEGER NOT NULL DEFAULT 0;
+        UPDATE jobs SET has_description = (description_text IS NOT NULL AND TRIM(description_text) <> '');
+        CREATE TRIGGER jobs_has_description_insert AFTER INSERT ON jobs BEGIN
+          UPDATE jobs SET has_description = (NEW.description_text IS NOT NULL AND TRIM(NEW.description_text) <> '') WHERE id = NEW.id;
+        END;
+        CREATE TRIGGER jobs_has_description_update AFTER UPDATE OF description_text ON jobs BEGIN
+          UPDATE jobs SET has_description = (NEW.description_text IS NOT NULL AND TRIM(NEW.description_text) <> '') WHERE id = NEW.id;
+        END;
+      `);
+    },
+  },
+  {
+    id: 9,
+    name: 'drop_reviewed_status',
+    up: (db) => {
+      // "Reviewed" is gone: opening a row no longer changes its status.
+      db.exec("UPDATE job_profile_status SET status = 'new' WHERE status = 'reviewed'");
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database, migrations: Migration[] = MIGRATIONS): number[] {

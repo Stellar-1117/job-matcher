@@ -4,6 +4,7 @@ import { detectAts, hintsFromUrl, prettifyToken } from '../src/main/sources/dete
 import { sourceLabel } from '@shared/jobs';
 import { setupTestDb } from './helpers';
 import { addLinks, deleteJobs, listJobs } from '../src/main/repos/jobs';
+import { addDescription, markUnreadable, refetchJobs, saveFetchedText, savePastedText } from '../src/main/repos/analysis';
 
 const norm = (s: string) => {
   const r = normalizeUrl(s);
@@ -161,5 +162,72 @@ describe('iCIMS URLs', () => {
     expect(detectAts('https://www.icims.com/about')).toBeNull();
     expect(hintsFromUrl('https://careers-acme-corp.icims.com/jobs/1/job')).toEqual({ sourceKey: 'icims', companyName: 'Acme Corp', title: null });
     expect(sourceLabel('icims')).toBe('iCIMS');
+  });
+});
+
+describe('latest paste', () => {
+  beforeEach(() => setupTestDb());
+  const A = 'https://acme.com/careers/jobs/1';
+  const B = 'https://acme.com/careers/jobs/2';
+  const C = 'https://acme.com/careers/jobs/3';
+  const byUrl = () => new Map(listJobs().map((j) => [j.url, j]));
+
+  it('marks every link of a paste — new ones and ones already saved — so the batch can be analyzed for another profile', async () => {
+    addLinks(`${A}\n${B}`);
+    await new Promise((r) => setTimeout(r, 5));
+    const second = addLinks(`${B}\n${C}\n${C}`);
+    expect(second.added).toHaveLength(1);
+    const jobs = byUrl();
+    const latest = jobs.get(C)!.lastAddedAt;
+    expect(jobs.get(B)!.lastAddedAt).toBe(latest); // already saved, re-pasted: part of the batch
+    expect(jobs.get(B)!.firstSeenAt < latest!).toBe(true); // → shown as "added again"
+    expect(jobs.get(C)!.firstSeenAt).toBe(latest); // → shown as "new"
+    expect(jobs.get(A)!.lastAddedAt! < latest!).toBe(true); // earlier paste only
+  });
+});
+
+describe('has_description flag', () => {
+  beforeEach(() => setupTestDb());
+
+  it('follows every write to the description', () => {
+    const [job] = addLinks('https://acme.com/careers/jobs/1').added;
+    const flag = () => listJobs()[0].hasDescription;
+    expect(flag()).toBe(false);
+    saveFetchedText(job.id, 'A real description');
+    expect(flag()).toBe(true);
+    refetchJobs([job.id]);
+    expect(flag()).toBe(false);
+    savePastedText(job.id, '   ');
+    expect(flag()).toBe(false); // whitespace only
+    savePastedText(job.id, 'Pasted text');
+    expect(flag()).toBe(true);
+    markUnreadable(job.id, job.url!, 'blocked');
+    expect(flag()).toBe(false);
+  });
+});
+
+describe('addDescription', () => {
+  beforeEach(() => setupTestDb());
+  const TEXT = 'Senior Backend Engineer\nAcme is hiring a backend engineer to build payment APIs in Go. Remote in the US, 5+ years of experience.';
+
+  it('saves a description without a link, once per text', () => {
+    const first = addDescription(TEXT, null);
+    expect(first.duplicate).toBe(false);
+    expect(first.job).toMatchObject({ url: null, sourceKey: 'description', sourceLabel: 'Pasted description', fetchStatus: 'manual_text', hasDescription: true, title: 'Senior Backend Engineer' });
+    // Same text with different spacing/case is the same job.
+    const again = addDescription(`  ${TEXT.toUpperCase().replace(/ /g, '  ')} `, null);
+    expect(again).toMatchObject({ duplicate: true, job: { id: first.job.id } });
+    expect(listJobs()).toHaveLength(1);
+    expect(listJobs(true).map((j) => j.id)).toEqual([first.job.id]);
+  });
+
+  it('with a link, saves the link with the text as its description (no fetch needed)', () => {
+    const { job } = addDescription(TEXT, 'https://www.linkedin.com/jobs/view/3812345678/?trk=x');
+    expect(job).toMatchObject({ url: 'https://linkedin.com/jobs/view/3812345678', fetchStatus: 'manual_text', hasDescription: true });
+    // An already saved link gets the description instead of a second job.
+    const [saved] = addLinks('https://acme.com/careers/jobs/9').added;
+    const r = addDescription(TEXT, 'https://acme.com/careers/jobs/9');
+    expect(r).toMatchObject({ duplicate: true, job: { id: saved.id, fetchStatus: 'manual_text' } });
+    expect(() => addDescription(TEXT, 'not a link')).toThrow(/isn't valid/);
   });
 });

@@ -41,14 +41,16 @@ export default function PasteDialog({ job, onClose, onSaved }: { job: JobListIte
         </p>
         <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
           <div className="font-medium text-slate-800">{job.title ?? 'Untitled job'}{job.companyName ? ` · ${job.companyName}` : ''}</div>
-          <div className="mt-0.5 flex items-center gap-2">
-            <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-500" title={job.url}>
-              {job.url}
-            </span>
-            <a href={job.url} target="_blank" rel="noreferrer" className="shrink-0 rounded-md border border-indigo-300 bg-white px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50">
-              Open in browser ↗
-            </a>
-          </div>
+          {job.url && (
+            <div className="mt-0.5 flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-500" title={job.url}>
+                {job.url}
+              </span>
+              <a href={job.url} target="_blank" rel="noreferrer" className="shrink-0 rounded-md border border-indigo-300 bg-white px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50">
+                Open in browser ↗
+              </a>
+            </div>
+          )}
         </div>
         <Textarea
           ref={box}

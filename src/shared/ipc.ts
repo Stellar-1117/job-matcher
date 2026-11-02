@@ -1,11 +1,10 @@
 import { z } from 'zod';
 import { TASKS } from './tasks';
 import { AppSettingsSchema, type AppSettings } from './settings';
-import type { AddLinksResult, JobListItem } from './jobs';
+import type { AddDescriptionResult, AddLinksResult, JobListItem, NeedsPasteJob } from './jobs';
 import { ResumeParsedSchema } from './llm-schemas';
-import { CollectParamsSchema, CompanyInputSchema, type CompanyRow, type DetectResult, type RunProgress } from './collect';
 import { AnalyzeParamsSchema, MIN_PASTED_TEXT, type AnalysisRow, type AnalyzeEstimate, type AnalyzeProgress, type UnreadableDomain } from './analysis';
-import { ExportOptionsSchema, JOB_STATUSES, type JobStatus, type ResultDetail, type ResultsList } from './results';
+import { ExportOptionsSchema, JOB_STATUSES, type ResultDetail, type ResultsList } from './results';
 import type { UsageSummary } from './usage';
 import { PreferencesSchema, type ParseStatus, type ProfileDetail, type ProfileSummary, type ResumeDetail } from './profile';
 import {
@@ -33,6 +32,7 @@ const id = z.number().int().positive();
 
 export const ipcContract = {
   'app:info': channel<{ version: string; dbPath: string; userDataPath: string }>()(empty),
+  'app:copyText': channel<{ ok: true }>()(z.object({ text: z.string().max(5_000_000) })),
 
   'settings:get': channel<AppSettings>()(empty),
   'settings:update': channel<AppSettings>()(AppSettingsSchema.partial()),
@@ -70,9 +70,11 @@ export const ipcContract = {
   'prompts:setActive': channel<PromptVersion[]>()(z.object({ id: z.number().int() })),
 
   'jobs:list': channel<JobListItem[]>()(empty),
+  /** Jobs whose description was given by hand (the Analyze descriptions screen). */
+  'jobs:listDescriptions': channel<JobListItem[]>()(empty),
   'jobs:addLinks': channel<AddLinksResult>()(z.object({ text: z.string().max(2_000_000) })),
   'jobs:delete': channel<{ deleted: number }>()(z.object({ ids: z.array(z.number().int()).max(100_000) })),
-  'jobs:needsPaste': channel<JobListItem[]>()(empty),
+  'jobs:needsPaste': channel<NeedsPasteJob[]>()(empty),
   'jobs:pasteText': channel<JobListItem>()(
     z.object({ id, text: z.string().trim().min(MIN_PASTED_TEXT, `Paste at least ${MIN_PASTED_TEXT} characters of the job description`).max(500_000) }),
   ),
@@ -80,6 +82,15 @@ export const ipcContract = {
   'jobs:retryFetch': channel<JobListItem>()(z.object({ id })),
   'jobs:retryAllUnreadable': channel<{ reset: number }>()(empty),
   'jobs:refetch': channel<{ reset: number }>()(z.object({ ids: z.array(id).min(1).max(100_000) })),
+  /** Save a job from its description text alone (the link is optional). */
+  'jobs:addDescription': channel<AddDescriptionResult>()(
+    z.object({
+      text: z.string().trim().min(MIN_PASTED_TEXT, `Paste at least ${MIN_PASTED_TEXT} characters of the job description`).max(500_000),
+      url: z.string().trim().max(2000).nullable().default(null),
+    }),
+  ),
+  /** Read the text out of an attached job description file (PDF, DOCX, TXT…). */
+  'jobs:readDescriptionFile': channel<{ text: string }>()(z.object({ fileName: z.string().min(1).max(255), data: z.instanceof(Uint8Array) })),
 
   'profiles:list': channel<ProfileSummary[]>()(empty),
   'profiles:get': channel<ProfileDetail>()(z.object({ id })),
@@ -100,18 +111,6 @@ export const ipcContract = {
   'resumes:delete': channel<ProfileDetail>()(z.object({ id })),
   'resumes:openFile': channel<{ ok: true }>()(z.object({ id })),
 
-  'companies:list': channel<CompanyRow[]>()(empty),
-  'companies:detect': channel<DetectResult>()(z.object({ url: z.string().trim().min(1).max(2000) })),
-  'companies:add': channel<CompanyRow[]>()(CompanyInputSchema),
-  'companies:update': channel<CompanyRow[]>()(CompanyInputSchema.partial().extend({ id, enabled: z.boolean().optional() })),
-  'companies:delete': channel<CompanyRow[]>()(z.object({ id })),
-  'companies:deleteMany': channel<CompanyRow[]>()(z.object({ ids: z.array(id).max(10_000) })),
-  'companies:test': channel<{ ok: boolean; jobsFound: number; sample: string[]; error: string | null; durationMs: number }>()(z.object({ id })),
-
-  'collect:start': channel<{ runId: number }>()(CollectParamsSchema),
-  'collect:cancel': channel<{ ok: true }>()(z.object({ runId: id })),
-  'collect:resume': channel<{ runId: number }>()(z.object({ runId: id })),
-  'collect:state': channel<{ active: RunProgress | null; last: RunProgress | null }>()(empty),
 
   'analyze:estimate': channel<AnalyzeEstimate>()(AnalyzeParamsSchema),
   'analyze:start': channel<{ runId: number }>()(z.object({ params: AnalyzeParamsSchema, budgetOverride: z.boolean().default(false) })),
@@ -125,8 +124,6 @@ export const ipcContract = {
 
   'results:list': channel<ResultsList>()(z.object({ profileId: id })),
   'results:detail': channel<ResultDetail>()(z.object({ analysisId: id })),
-  /** Opening a row: new → reviewed for that profile only. */
-  'results:open': channel<{ status: JobStatus }>()(z.object({ profileId: id, jobId: id })),
   'results:setStatus': channel<{ updated: number }>()(z.object({ profileId: id, jobIds: z.array(id).max(100_000), status: z.enum(JOB_STATUSES) })),
   'results:feedback': channel<{ ok: true }>()(
     z.object({ profileId: id, jobId: id, feedback: z.union([z.literal(-1), z.literal(0), z.literal(1)]), note: z.string().max(2000).nullable() }),
@@ -146,7 +143,6 @@ export type IpcOutput<C extends IpcChannel> = IpcContract[C]['output'];
 export interface IpcEvents {
   'usage:logged': { task: string; costUsd: number };
   'resume:updated': { resumeId: number; profileId: number; status: ParseStatus };
-  'run:progress': RunProgress;
   'analyze:progress': AnalyzeProgress;
   'jobs:updated': { count: number };
 }

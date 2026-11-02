@@ -9,6 +9,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } fr
  */
 export function useRowSelection(orderedIds: number[]) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Read through a ref so the prop getters below stay stable and memoized rows don't all re-render.
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
   const anchor = useRef<number | null>(null);
   const drag = useRef<{ mode: boolean; last: number } | null>(null);
   const order = useRef(orderedIds);
@@ -55,7 +58,7 @@ export function useRowSelection(orderedIds: number[]) {
   }, []);
 
   /** Props for the checkbox cell (the drag handle). */
-  const handleProps = (id: number) => ({
+  const handleProps = useCallback((id: number) => ({
     onMouseDown: (e: MouseEvent) => {
       if (e.button !== 0) return;
       e.preventDefault();
@@ -63,7 +66,7 @@ export function useRowSelection(orderedIds: number[]) {
         applyRange(anchor.current, id, true);
         return;
       }
-      const mode = !selected.has(id);
+      const mode = !selectedRef.current.has(id);
       applyRange(id, id, mode);
       anchor.current = id;
       drag.current = { mode, last: id };
@@ -71,10 +74,10 @@ export function useRowSelection(orderedIds: number[]) {
     },
     title: 'Click to select · drag to select several · Shift-click for a range',
     style: { cursor: 'pointer' } as const,
-  });
+  }), [applyRange]);
 
   /** Props for the whole row: continues a drag, and Ctrl/Cmd-click toggles. */
-  const rowProps = (id: number) => ({
+  const rowProps = useCallback((id: number) => ({
     onMouseEnter: () => {
       if (!drag.current) return;
       // Fill any rows skipped by a fast mouse movement.
@@ -88,7 +91,7 @@ export function useRowSelection(orderedIds: number[]) {
       toggle(id);
       anchor.current = id;
     },
-  });
+  }), [applyRange, toggle]);
 
   const setMany = useCallback((ids: number[], on: boolean) => {
     setSelected((s) => {

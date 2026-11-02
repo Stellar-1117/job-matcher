@@ -5,12 +5,11 @@ import { SUB_SCORE_KEYS, computeTotal, computeVerdict, type SubScoreKey, type Th
 
 // ---- Per job × profile status (§2) ----------------------------------------------------------
 
-export const JOB_STATUSES = ['new', 'reviewed', 'selected', 'exported', 'applied', 'rejected'] as const;
+export const JOB_STATUSES = ['new', 'selected', 'exported', 'applied', 'rejected'] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
 export const JOB_STATUS_LABELS: Record<JobStatus, string> = {
   new: 'New',
-  reviewed: 'Reviewed',
   selected: 'Selected',
   exported: 'Exported',
   applied: 'Applied',
@@ -51,7 +50,8 @@ export type ResultOutcome = 'matched' | 'hard_filter' | 'pre_score_skip';
 export interface ResultRow {
   jobId: number;
   analysisId: number;
-  url: string;
+  /** null for a job saved from its description alone. */
+  url: string | null;
   title: string | null;
   companyName: string | null;
   /** Location from the job source (may include the work mode, e.g. "New York (Hybrid)"). */
@@ -154,7 +154,7 @@ export type ExportOptions = z.infer<typeof ExportOptionsSchema>;
 export type ExportOptionsInput = z.input<typeof ExportOptionsSchema>;
 
 export interface ExportRow {
-  url: string;
+  url: string | null;
   title: string | null;
   company: string | null;
   /** Remote | Hybrid | Onsite, or null when unknown. */
@@ -206,7 +206,7 @@ export function buildExport(rows: ExportRow[], o: Pick<ExportOptions, 'format' |
     return `﻿${lines.join('\r\n')}\r\n`;
   }
   const lines = rows.map((r) => {
-    const parts = [r.url];
+    const parts = [r.url ?? '(no link)'];
     if (o.include.title) parts.push(r.title ?? '');
     if (o.include.company) parts.push(r.company ?? '');
     if (o.include.score) parts.push(r.score != null ? String(r.score) : '');

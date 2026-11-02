@@ -72,9 +72,11 @@ export default function ResultDetailPanel({
         <div className="flex flex-col gap-3">
           {/* Actions */}
           <div className="flex flex-wrap items-center gap-2">
-            <a href={row.url} target="_blank" rel="noreferrer" className="rounded-md border border-indigo-300 bg-white px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50">
-              Open link ↗
-            </a>
+            {row.url && (
+              <a href={row.url} target="_blank" rel="noreferrer" className="rounded-md border border-indigo-300 bg-white px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50">
+                Open link ↗
+              </a>
+            )}
             <Button size="sm" onClick={onReanalyze} title="Run matching again for this job and profile (costs one LLM call)">
               Re-analyze
             </Button>

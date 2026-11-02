@@ -3,16 +3,16 @@ import { cx } from './components/ui';
 import SettingsScreen, { type SettingsTab } from './screens/settings/SettingsScreen';
 import JobsScreen from './screens/jobs/JobsScreen';
 import ProfilesScreen from './screens/profiles/ProfilesScreen';
-import CollectScreen from './screens/collect/CollectScreen';
+import DescriptionsScreen from './screens/descriptions/DescriptionsScreen';
 import ResultsScreen from './screens/results/ResultsScreen';
 import UsageScreen from './screens/usage/UsageScreen';
 
-export type Screen = 'jobs' | 'collect' | 'results' | 'profiles' | 'usage' | 'settings';
+export type Screen = 'jobs' | 'descriptions' | 'results' | 'profiles' | 'usage' | 'settings';
 export type Navigate = (screen: Screen, opts?: { settingsTab?: SettingsTab }) => void;
 
 const NAV: { key: Screen; label: string }[] = [
-  { key: 'collect', label: 'Collect' },
   { key: 'jobs', label: 'Jobs & Analyze' },
+  { key: 'descriptions', label: 'Analyze descriptions' },
   { key: 'profiles', label: 'Profiles' },
   { key: 'results', label: 'Results' },
   { key: 'usage', label: 'Usage' },
@@ -20,7 +20,7 @@ const NAV: { key: Screen; label: string }[] = [
 ];
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>('collect');
+  const [screen, setScreen] = useState<Screen>('jobs');
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('keys');
 
   const navigate: Navigate = (s, opts) => {
@@ -53,8 +53,8 @@ export default function App() {
           <JobsScreen navigate={navigate} />
         ) : screen === 'profiles' ? (
           <ProfilesScreen />
-        ) : screen === 'collect' ? (
-          <CollectScreen navigate={navigate} />
+        ) : screen === 'descriptions' ? (
+          <DescriptionsScreen navigate={navigate} />
         ) : screen === 'results' ? (
           <ResultsScreen navigate={navigate} />
         ) : (

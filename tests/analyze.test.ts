@@ -99,9 +99,8 @@ const { addLinks, upsertCollectedJob, getJobItem } = await import('../src/main/r
 const { createProfile, createResume, saveParseResult, savePreferences } = await import('../src/main/repos/profiles');
 const { createPromptVersion } = await import('../src/main/repos/prompts');
 const { updateSettings } = await import('../src/main/repos/settings');
-const { addCompany } = await import('../src/main/repos/companies');
-const { addSourceHealth, createRun, getRun } = await import('../src/main/repos/runs');
-const { listNeedsPaste, listRunAnalyses, savePastedText } = await import('../src/main/repos/analysis');
+const { createRun, getRun } = await import('../src/main/repos/runs');
+const { addDescription, listNeedsPaste, listRunAnalyses, savePastedText } = await import('../src/main/repos/analysis');
 const { DEFAULT_PREFERENCES } = await import('../src/shared/profile');
 const { DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS } = await import('../src/shared/scoring');
 const { analyzeState, cancelAnalyze, estimate, resumeAnalyze, startAnalyze, BudgetExceededError } = await import('../src/main/runs/analyze');
@@ -243,6 +242,17 @@ describe('analyze run', () => {
     expect(count('matching')).toBe(2);
   });
 
+  it('a description saved without a link is analyzed without fetching, and takes its title from the extraction', async () => {
+    extractionOver = { job_title: 'Staff Payments Engineer', company_name: 'Globex' };
+    const { job } = addDescription(`Job description
+${DESC}`, null);
+    expect(job.title).toBe('Job description');
+    await startAnalyze({ params: params({ jobIds: [job.id] }), budgetOverride: false }, deps()).done;
+    expect(count('job_extraction')).toBe(1);
+    expect(count('matching')).toBe(1);
+    expect(getJobItem(job.id)).toMatchObject({ url: null, title: 'Staff Payments Engineer', companyName: 'Globex', fetchStatus: 'manual_text' });
+  });
+
   it('unreadable links go to the manual-paste queue; pasted text is analyzed normally on resume', async () => {
     addLinks('https://www.linkedin.com/jobs/view/backend-engineer-at-acme-3812345678');
     const http = { 'https://linkedin.com/jobs/view/3812345678': '<html><body><p>Sign in to view this job.</p></body></html>' };
@@ -250,7 +260,7 @@ describe('analyze run', () => {
     await done;
     expect(calls).toHaveLength(0);
     const [job] = listNeedsPaste();
-    expect(job).toMatchObject({ fetchStatus: 'unreadable', fetchError: expect.stringMatching(/login wall/) });
+    expect(job).toMatchObject({ fetchStatus: 'unreadable', profileIds: [profileId], fetchError: expect.stringMatching(/login wall/) });
     expect(analyzeState().last).toMatchObject({ remaining: 2, blocked: 2, prepareOutcomes: { needs_text: 1 }, matchOutcomes: { needs_text: 1 } });
     expect(getDb().prepare('SELECT domain FROM unreadable_log').all()).toEqual([{ domain: 'linkedin.com' }]);
 
@@ -288,18 +298,6 @@ describe('analyze run', () => {
     const [job] = getDb().prepare('SELECT id FROM jobs').all() as { id: number }[];
     expect(getJobItem(job.id)).toMatchObject({ title: 'Staff Engineer', companyName: 'Globex', fetchStatus: 'fetched', postedAtSource: 'source' });
     expect(count('matching')).toBe(1);
-  });
-
-  it('marks jobs the ATS no longer lists as closed', async () => {
-    const company = addCompany({ name: 'Acme', careersUrl: 'https://job-boards.greenhouse.io/acme', atsType: 'greenhouse', boardToken: 'acme' });
-    const job = collected({ companyId: company });
-    // A later successful collection of Acme that did not include the job.
-    const later = createRun('collect', {}, 1);
-    getDb().prepare('UPDATE runs SET started_at = ? WHERE id = ?').run(new Date(Date.now() + 60_000).toISOString(), later);
-    addSourceHealth({ runId: later, sourceKey: 'greenhouse', companyId: company, label: 'Acme', jobsFound: 5, jobsInRange: 0, jobsNew: 0, status: 'ok', error: null, durationMs: 1 });
-    await startAnalyze({ params: params(), budgetOverride: false }, deps()).done;
-    expect(getJobItem(job)).toMatchObject({ isClosed: true, closedReason: expect.stringMatching(/No longer listed/) });
-    expect(calls).toHaveLength(0);
   });
 
   it('optional pre-score skips weak matches before matching', async () => {

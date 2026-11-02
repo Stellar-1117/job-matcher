@@ -20,7 +20,6 @@ import {
   getJobForAnalysis,
   markClosed,
   markUnreadable,
-  noLongerListed,
   saveExtraction,
   saveFetchedText,
   setTitleIfMissing,
@@ -171,10 +170,6 @@ export async function prepareJob(jobId: number, deps: StepDeps, taxonomy: Taxono
   const phrase = closedPhrase(text);
   if (phrase) {
     markClosed(jobId, `The posting says "${phrase}"`);
-    return { outcome: 'closed', costUsd: 0 };
-  }
-  if (noLongerListed(job)) {
-    markClosed(jobId, 'No longer listed: the latest collection from this company did not include it');
     return { outcome: 'closed', costUsd: 0 };
   }
   if (freshVia && freshVia !== 'ats' && looksOdd(text)) {

@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { AnalysisRow, AnalyzeEstimate, AnalyzeParamsInput, AnalyzeProgress, MatchOutcome, PrepareOutcome } from '@shared/analysis';
 import type { DateRange } from '@shared/settings';
 import type { JobDateField } from '@shared/dates';
-import type { JobListItem } from '@shared/jobs';
+import type { JobListItem, NeedsPasteJob } from '@shared/jobs';
+import type { ProfileSummary } from '@shared/profile';
 import { VERDICT_LABELS } from '@shared/scoring';
 import { TASK_META } from '@shared/tasks';
 import { invoke, useIpc, useIpcEvent } from '../../api';
-import { Badge, Button, Card, ErrorBox, Spinner, Toggle, cx, useAction } from '../../components/ui';
+import { Badge, Button, Card, ErrorBox, JobLink, Select, Spinner, Toggle, cx, useAction } from '../../components/ui';
+import { useRowSelection } from '../../hooks/useRowSelection';
 import { useConfirm } from '../../components/confirm';
 import DateRangePicker from '../../components/DateRangePicker';
 import type { Navigate } from '../../App';
@@ -170,9 +172,9 @@ function ResultsPreview({ rows, onOpenResults }: { rows: AnalysisRow[]; onOpenRe
                 <td className="p-2 text-base font-semibold tabular-nums">{r.total}</td>
                 <td className="p-2">{r.verdict && <Badge tone={VERDICT_TONES[r.verdict]}>{VERDICT_LABELS[r.verdict]}</Badge>}</td>
                 <td className="min-w-0 p-2">
-                  <a href={r.url} target="_blank" rel="noreferrer" className="block truncate font-medium text-indigo-700 hover:underline" title={r.url}>
-                    {r.title ?? r.url}
-                  </a>
+                  <JobLink href={r.url} className="block truncate font-medium text-indigo-700 hover:underline" title={r.url ?? undefined}>
+                    {r.title ?? r.url ?? 'Untitled description'}
+                  </JobLink>
                   <div className="truncate text-xs text-slate-500">{r.companyName}</div>
                 </td>
                 <td className="truncate p-2 text-slate-600">{r.profileName}</td>
@@ -191,9 +193,9 @@ function ResultsPreview({ rows, onOpenResults }: { rows: AnalysisRow[]; onOpenRe
             <div className="mt-2 max-h-72 overflow-auto rounded-md border border-slate-200 text-xs">
               {filtered.map((r) => (
                 <div key={r.analysisId} className="border-b border-slate-100 px-3 py-1.5 last:border-0">
-                  <a href={r.url} target="_blank" rel="noreferrer" className="font-medium text-indigo-700 hover:underline">
-                    {r.title ?? r.url}
-                  </a>
+                  <JobLink href={r.url} className="font-medium text-indigo-700 hover:underline">
+                    {r.title ?? r.url ?? 'Untitled description'}
+                  </JobLink>
                   <span className="text-slate-500">
                     {r.companyName ? ` · ${r.companyName}` : ''} · {r.profileName}
                   </span>
@@ -210,9 +212,50 @@ function ResultsPreview({ rows, onOpenResults }: { rows: AnalysisRow[]; onOpenRe
   );
 }
 
-function NeedsPasteCard({ jobs, onPaste }: { jobs: JobListItem[]; onPaste: (j: JobListItem) => void }) {
+function NeedsPasteCard({ jobs, profiles, onPaste, onChanged }: { jobs: NeedsPasteJob[]; profiles: ProfileSummary[]; onPaste: (j: JobListItem) => void; onChanged: () => void }) {
   const domains = useIpc('analyze:unreadableDomains', {}, [jobs.length]);
   const retry = useAction();
+  const action = useAction();
+  const confirm = useConfirm();
+  /** 'all' | 'none' (not queued for any profile) | a profile id */
+  const [profileFilter, setProfileFilter] = useState('all');
+  const [notice, setNotice] = useState<string | null>(null);
+  const shown = useMemo(
+    () => jobs.filter((j) => (profileFilter === 'all' ? true : profileFilter === 'none' ? !j.profileIds.length : j.profileIds.includes(Number(profileFilter)))),
+    [jobs, profileFilter],
+  );
+  const shownIds = useMemo(() => shown.map((j) => j.id), [shown]);
+  const sel = useRowSelection(shownIds);
+  // Only what's on screen counts, so a filter change never acts on hidden rows.
+  const selected = shown.filter((j) => sel.selected.has(j.id));
+  const countFor = (pid: number) => jobs.filter((j) => j.profileIds.includes(pid)).length;
+  const unqueued = jobs.filter((j) => !j.profileIds.length).length;
+  const profileName = (id: number) => profiles.find((p) => p.id === id)?.name ?? `Profile ${id}`;
+
+  const copy = () =>
+    action.run(async () => {
+      const urls = selected.map((j) => j.url).filter((u): u is string => !!u);
+      await invoke('app:copyText', { text: `${urls.join('\n')}\n` });
+      setNotice(`Copied ${plural(urls.length, 'link')} to the clipboard.`);
+    });
+
+  const remove = async () => {
+    const ids = selected.map((j) => j.id);
+    const ok = await confirm({
+      title: `Delete ${plural(ids.length, 'job')}?`,
+      message: 'They are removed from the database, with their analyses.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    void action.run(async () => {
+      await invoke('jobs:delete', { ids });
+      sel.setMany(ids, false);
+      setNotice(`Deleted ${plural(ids.length, 'job')}.`);
+      onChanged();
+    });
+  };
+
   return (
     <Card
       title={`Needs manual paste (${jobs.length})`}
@@ -230,24 +273,78 @@ function NeedsPasteCard({ jobs, onPaste }: { jobs: JobListItem[]; onPaste: (j: J
       <p className="mb-2 text-xs text-slate-500">
         These pages couldn't be read automatically (login wall, bot check, or JavaScript the hidden browser couldn't render). Paste each description, then click Resume on the analysis.
       </p>
-      <ErrorBox error={retry.error} />
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-1.5 text-sm text-slate-600">
+          Profile
+          <Select
+            value={profileFilter}
+            onChange={(e) => {
+              setProfileFilter(e.target.value);
+              setNotice(null);
+            }}
+          >
+            <option value="all">Any ({jobs.length})</option>
+            {profiles
+              .filter((p) => countFor(p.id) > 0)
+              .map((p) => (
+                <option key={p.id} value={String(p.id)}>
+                  Queued for {p.name} ({countFor(p.id)})
+                </option>
+              ))}
+            {unqueued > 0 && <option value="none">Not queued for any profile ({unqueued})</option>}
+          </Select>
+        </label>
+        <span className="text-sm font-medium text-slate-700">{selected.length} selected</span>
+        <Button size="sm" variant="ghost" disabled={!shownIds.length} onClick={() => sel.setMany(shownIds, true)}>
+          Select all shown
+        </Button>
+        <Button size="sm" variant="ghost" disabled={!selected.length} onClick={sel.clear}>
+          Select none
+        </Button>
+        <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" disabled={action.busy || !selected.some((j) => j.url)} onClick={() => void copy()} title="Copy the selected links, one per line">
+            Copy links
+          </Button>
+          <Button size="sm" variant="danger" disabled={action.busy || !selected.length} onClick={() => void remove()}>
+            Delete selected
+          </Button>
+        </div>
+      </div>
+      <ErrorBox error={retry.error ?? action.error} />
+      {notice && <p className="mb-2 text-sm text-emerald-700">✓ {notice}</p>}
       <div className="max-h-80 overflow-auto rounded-md border border-slate-200">
-        {jobs.map((j) => (
-          <div key={j.id} className="flex items-start gap-3 border-b border-slate-100 px-3 py-2 last:border-0">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium text-slate-800">
-                {j.title ?? j.url.replace(/^https:\/\//, '')}
-                {j.companyName && <span className="font-normal text-slate-500"> · {j.companyName}</span>}
+        {shown.length === 0 && <p className="px-3 py-4 text-center text-sm text-slate-500">No jobs for this profile.</p>}
+        {shown.map((j) => {
+          const isSel = sel.selected.has(j.id);
+          return (
+            <div key={j.id} className={cx('flex items-start gap-3 border-b border-slate-100 px-3 py-2 last:border-0', isSel && 'bg-indigo-50/60')} {...sel.rowProps(j.id)}>
+              <div className="pt-0.5" {...sel.handleProps(j.id)}>
+                <input type="checkbox" readOnly checked={isSel} className="pointer-events-none" />
               </div>
-              <div className="truncate text-xs text-amber-700" title={j.fetchError ?? ''}>
-                {j.fetchError}
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-slate-800">
+                  <JobLink href={j.url} className="text-slate-800 hover:underline" title={j.url ?? undefined}>
+                    {j.title ?? j.url?.replace(/^https:\/\//, '') ?? 'Untitled description'}
+                  </JobLink>
+                  {j.companyName && <span className="font-normal text-slate-500"> · {j.companyName}</span>}
+                </div>
+                <div className="truncate text-xs text-amber-700" title={j.fetchError ?? ''}>
+                  {j.fetchError}
+                </div>
+                {j.profileIds.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {j.profileIds.map((id) => (
+                      <Badge key={id}>{profileName(id)}</Badge>
+                    ))}
+                  </div>
+                )}
               </div>
+              <Button size="sm" variant="primary" onClick={() => onPaste(j)}>
+                Paste description
+              </Button>
             </div>
-            <Button size="sm" variant="primary" onClick={() => onPaste(j)}>
-              Paste description
-            </Button>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {domains.data && domains.data.length > 0 && (
         <details className="mt-3 text-xs">
@@ -346,6 +443,8 @@ function Segmented<K extends string>({ options, value, onChange }: { options: { 
  * Analysis controls for the Jobs screen: profiles, which jobs (a date range by posted date or date
  * added, or the jobs selected in the list), estimate, run progress and a preview of the results.
  * `children` render between the run status and the results preview (the job list).
+ * With `selectionOnly` (the noun for what's listed, e.g. "description") there's no date range: it
+ * analyzes exactly the selected jobs.
  */
 export default function AnalyzePanel({
   navigate,
@@ -356,6 +455,7 @@ export default function AnalyzePanel({
   selectedJobIds,
   onPaste,
   refreshKey,
+  selectionOnly,
   children,
 }: {
   navigate: Navigate;
@@ -364,9 +464,10 @@ export default function AnalyzePanel({
   dateField: JobDateField;
   onDateFieldChange: (f: JobDateField) => void;
   selectedJobIds: number[];
-  onPaste: (j: JobListItem) => void;
+  onPaste?: (j: JobListItem) => void;
   /** Changes whenever the job list is reloaded (links added, jobs deleted) so the estimate follows. */
   refreshKey: unknown;
+  selectionOnly?: string;
   children?: ReactNode;
 }) {
   const profiles = useIpc('profiles:list', {});
@@ -395,7 +496,7 @@ export default function AnalyzePanel({
     if (state.data) setRun(state.data.active ?? state.data.last);
   }, [state.data]);
 
-  const bySelection = scope === 'selected';
+  const bySelection = !!selectionOnly || scope === 'selected';
   const params: AnalyzeParamsInput | null = useMemo(() => {
     if (!range || !selected || !selected.size) return null;
     if (bySelection && !selectedJobIds.length) return null;
@@ -509,7 +610,11 @@ export default function AnalyzePanel({
   return (
     <>
       <Card title="Analyze" actions={estimating ? <Spinner /> : null}>
-        <p className="-mt-1 mb-3 text-xs text-slate-500">Fetch descriptions, extract job fields, apply your hard filters and score the jobs against your profiles.</p>
+        <p className="-mt-1 mb-3 text-xs text-slate-500">
+          {selectionOnly
+            ? `Extract job fields, apply your hard filters and score the selected ${selectionOnly}s against your profiles.`
+            : 'Fetch descriptions, extract job fields, apply your hard filters and score the jobs against your profiles.'}
+        </p>
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
           <div>
             <div className="mb-1.5 text-sm font-medium text-slate-700">Profiles</div>
@@ -544,18 +649,24 @@ export default function AnalyzePanel({
           </div>
 
           <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-slate-700">Jobs</span>
-              <Segmented
-                value={scope}
-                onChange={setScope}
-                options={[
-                  { key: 'range', label: 'By date' },
-                  { key: 'selected', label: `Selected in list (${selectedJobIds.length})` },
-                ]}
-              />
-            </div>
-            {bySelection ? (
+            {selectionOnly ? (
+              <p className="text-xs text-slate-500">
+                {selectedJobIds.length ? `Analyzes the ${plural(selectedJobIds.length, selectionOnly)} selected below.` : `Select the ${selectionOnly}s to analyze in the list below.`}
+              </p>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium text-slate-700">Jobs</span>
+                <Segmented
+                  value={scope}
+                  onChange={setScope}
+                  options={[
+                    { key: 'range', label: 'By date' },
+                    { key: 'selected', label: `Selected in list (${selectedJobIds.length})` },
+                  ]}
+                />
+              </div>
+            )}
+            {selectionOnly ? null : bySelection ? (
               <p className="text-xs text-slate-500">
                 {selectedJobIds.length
                   ? `Analyzes the ${plural(selectedJobIds.length, 'job')} selected in the list below, whatever their date. Closed jobs are skipped.`
@@ -574,7 +685,7 @@ export default function AnalyzePanel({
                 <p className="text-xs text-slate-500">
                   {dateField === 'posted'
                     ? 'Uses the posting date when known, otherwise the day the job was added.'
-                    : 'Uses the day the job was added to the app (pasted or collected), whatever its posting date.'}{' '}
+                    : 'Uses the day the job was added to the app, whatever its posting date.'}{' '}
                   Closed jobs are skipped.
                 </p>
                 {est && est.sources.length > 0 && (
@@ -633,7 +744,7 @@ export default function AnalyzePanel({
         />
       )}
 
-      {needsPaste.data && needsPaste.data.length > 0 && <NeedsPasteCard jobs={needsPaste.data} onPaste={onPaste} />}
+      {!selectionOnly && onPaste && needsPaste.data && needsPaste.data.length > 0 && <NeedsPasteCard jobs={needsPaste.data} profiles={profiles.data ?? []} onPaste={onPaste} onChanged={() => void needsPaste.reload()} />}
 
       {children}
 

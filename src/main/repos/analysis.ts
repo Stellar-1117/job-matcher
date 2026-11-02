@@ -1,10 +1,11 @@
+import { createHash } from 'node:crypto';
 import { getDb, nowIso } from '../db';
 import { StoredJobExtractionSchema, isLegacyExtraction, type JobExtraction, type MatchResult } from '@shared/llm-schemas';
 import type { AnalysisRow, AnalyzeItemError, ItemStatus, UnreadableDomain } from '@shared/analysis';
 import type { HardFilterOutcome } from '@shared/hardFilters';
 import { computeTotal, computeVerdict, type Thresholds, type Weights } from '@shared/scoring';
-import type { JobListItem } from '@shared/jobs';
-import { getJobItem } from './jobs';
+import { DESCRIPTION_SOURCE_KEY, jobLink, type AddDescriptionResult, type JobListItem, type NeedsPasteJob } from '@shared/jobs';
+import { addLinks, findJobIdByUrl, getJobItem } from './jobs';
 
 // ---- Jobs: what the pipeline needs ----------------------------------------------------------
 
@@ -93,6 +94,48 @@ export function savePastedText(jobId: number, text: string, now = nowIso()): voi
   })();
 }
 
+/** A placeholder title until extraction reads the real one: the description's first line. */
+function firstLine(text: string): string | null {
+  const line = text.split('\n').map((l) => l.trim()).find(Boolean);
+  if (!line) return null;
+  return line.length > 120 ? `${line.slice(0, 117)}…` : line;
+}
+
+/**
+ * Save a job from its description (pasted or read from a file) so it can be analyzed without
+ * fetching anything. With a link, the text becomes that link's description (saving the link if
+ * it's new); without one, the job is keyed by a hash of the text, so the same description pasted
+ * twice is one job.
+ */
+export function addDescription(text: string, url: string | null, now = nowIso()): AddDescriptionResult {
+  const db = getDb();
+  let jobId: number;
+  let duplicate: boolean;
+  if (url) {
+    const r = addLinks(url);
+    if (r.invalid.length) throw new Error(`That link isn't valid: ${r.invalid[0].reason}`);
+    duplicate = !r.added.length;
+    jobId = r.added[0]?.id ?? r.duplicates[0].jobId!;
+  } else {
+    const hash = createHash('sha256').update(text.replace(/\s+/g, ' ').trim().toLowerCase()).digest('hex').slice(0, 24);
+    const canon = `${DESCRIPTION_SOURCE_KEY}:${hash}`;
+    const existing = findJobIdByUrl(canon);
+    duplicate = existing != null;
+    jobId =
+      existing ??
+      Number(
+        db
+          .prepare("INSERT INTO jobs (canonical_url, source_key, title, posted_at_source, first_seen_at, fetch_status) VALUES (?, ?, ?, 'first_seen', ?, 'pending')")
+          .run(canon, DESCRIPTION_SOURCE_KEY, firstLine(text), now).lastInsertRowid,
+      );
+  }
+  const cur = db.prepare('SELECT description_text, fetch_status FROM jobs WHERE id = ?').get(jobId) as { description_text: string | null; fetch_status: string };
+  // Same text as before: keep its extraction and scores.
+  if (cur.fetch_status !== 'manual_text' || cur.description_text !== text) savePastedText(jobId, text, now);
+  db.prepare('UPDATE jobs SET last_added_at = ? WHERE id = ?').run(now, jobId);
+  return { job: getJobItem(jobId)!, duplicate };
+}
+
 /**
  * Download and read these jobs again on the next analysis (e.g. after the app learned to read more
  * from a site): description, extraction and tags are cleared; scores stay cached. Jobs whose
@@ -125,9 +168,22 @@ export function resetAllUnreadable(): number {
   return getDb().prepare("UPDATE jobs SET fetch_status = 'pending', fetch_error = NULL WHERE fetch_status = 'unreadable' AND is_closed = 0").run().changes;
 }
 
-export function listNeedsPaste(): JobListItem[] {
-  const rows = getDb().prepare("SELECT id FROM jobs WHERE fetch_status = 'unreadable' AND is_closed = 0 ORDER BY updated_at DESC").all() as { id: number }[];
-  return rows.map((r) => getJobItem(r.id)).filter((j): j is JobListItem => j != null);
+export function listNeedsPaste(): NeedsPasteJob[] {
+  const db = getDb();
+  const rows = db.prepare("SELECT id FROM jobs WHERE fetch_status = 'unreadable' AND is_closed = 0 ORDER BY updated_at DESC").all() as { id: number }[];
+  // The profiles each job was queued for in analysis runs (it never got past the fetch for them).
+  const queued = db
+    .prepare(
+      `SELECT DISTINCT i.job_id, i.profile_id FROM run_items i JOIN jobs j ON j.id = i.job_id
+       WHERE i.step = 'match' AND i.profile_id IS NOT NULL AND j.fetch_status = 'unreadable' AND j.is_closed = 0`,
+    )
+    .all() as { job_id: number; profile_id: number }[];
+  const byJob = new Map<number, Set<number>>();
+  for (const q of queued) byJob.set(q.job_id, (byJob.get(q.job_id) ?? new Set()).add(q.profile_id));
+  return rows
+    .map((r) => getJobItem(r.id))
+    .filter((j): j is JobListItem => j != null)
+    .map((j) => ({ ...j, profileIds: [...new Set([...(byJob.get(j.id) ?? []), ...j.analyses.map((a) => a.profileId)])] }));
 }
 
 export function listUnreadableDomains(): UnreadableDomain[] {
@@ -140,25 +196,6 @@ export function listUnreadableDomains(): UnreadableDomain[] {
       )
       .all() as any[]
   ).map((r) => ({ domain: r.domain, count: r.count, lastReason: r.last_reason, lastAt: r.last_at }));
-}
-
-/** ATS adapters whose listing returns every open posting (others stop early at the date window). */
-const COMPLETE_LISTING_SOURCES = ['greenhouse', 'lever', 'ashby'];
-
-/**
- * "The ATS API no longer lists it": a later successful collection of the job's company didn't
- * include it. Only for adapters that list all postings.
- */
-export function noLongerListed(job: Pick<JobForAnalysis, 'id' | 'companyId' | 'sourceKey' | 'lastSeenAt'>): boolean {
-  if (job.companyId == null || !job.lastSeenAt || !COMPLETE_LISTING_SOURCES.includes(job.sourceKey)) return false;
-  const r = getDb()
-    .prepare(
-      `SELECT 1 FROM source_health h JOIN runs r ON r.id = h.run_id JOIN companies c ON c.id = h.company_id
-       WHERE h.company_id = ? AND h.status IN ('ok', 'warning') AND h.jobs_found > 0 AND c.ats_type = ? AND r.started_at > ?
-       LIMIT 1`,
-    )
-    .get(job.companyId, job.sourceKey, job.lastSeenAt);
-  return !!r;
 }
 
 // ---- Job extractions ------------------------------------------------------------------------
@@ -225,7 +262,7 @@ function applyPostingIdentity(jobId: number, f: JobExtraction): void {
   getDb()
     .prepare(
       `UPDATE jobs SET
-         title = CASE WHEN @title IS NOT NULL AND (source_key LIKE 'manual:%' OR title IS NULL OR title = '') THEN @title ELSE title END,
+         title = CASE WHEN @title IS NOT NULL AND (source_key LIKE 'manual:%' OR source_key = 'description' OR title IS NULL OR title = '') THEN @title ELSE title END,
          company_name = COALESCE(NULLIF(company_name, ''), @company),
          location_raw = COALESCE(NULLIF(location_raw, ''), @location)
        WHERE id = @id`,
@@ -372,7 +409,7 @@ export function upsertAnalysis(k: AnalysisKey, w: AnalysisWrite): number {
 export function listRunAnalyses(runId: number, weights: Weights, thresholds: Thresholds): AnalysisRow[] {
   const rows = getDb()
     .prepare(
-      `SELECT a.*, j.title, j.company_name, j.canonical_url, p.name AS profile_name
+      `SELECT a.*, j.title, j.company_name, j.canonical_url, j.source_key, p.name AS profile_name
        FROM analyses a JOIN jobs j ON j.id = a.job_id JOIN profiles p ON p.id = a.profile_id
        WHERE a.run_id = ? ORDER BY a.id`,
     )
@@ -390,7 +427,7 @@ export function listRunAnalyses(runId: number, weights: Weights, thresholds: Thr
       profileName: r.profile_name,
       title: r.title,
       companyName: r.company_name,
-      url: r.canonical_url,
+      url: jobLink(r.source_key, r.canonical_url),
       outcome: r.outcome,
       total,
       verdict: total != null ? computeVerdict(total, thresholds) : r.outcome === 'pre_score_skip' ? 'skip' : null,
@@ -489,8 +526,7 @@ export interface CandidateJob {
 
 export function listCandidateRows(jobIds: number[] | null): CandidateJob[] {
   const db = getDb();
-  const cols = `id, source_key, posted_at, first_seen_at, is_closed, fetch_status, extraction_id,
-    (description_text IS NOT NULL AND TRIM(description_text) <> '') AS has_description`;
+  const cols = `id, source_key, posted_at, first_seen_at, is_closed, fetch_status, extraction_id, has_description`;
   const rows = (jobIds ? jobIds.map((id) => db.prepare(`SELECT ${cols} FROM jobs WHERE id = ?`).get(id)).filter(Boolean) : db.prepare(`SELECT ${cols} FROM jobs`).all()) as any[];
   return rows.map((r) => ({
     id: r.id,
