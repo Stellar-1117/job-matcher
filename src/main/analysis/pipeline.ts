@@ -30,7 +30,7 @@ import {
 } from '../repos/analysis';
 import { profileTemplateVars } from '../resume/vars';
 import { closedPhrase, looksOdd } from './closed';
-import { fetchDescription, type FetchVia, type PageRenderer } from './fetch';
+import { fetchDescription, type FetchResult, type FetchVia, type PageRenderer } from './fetch';
 
 /**
  * The analysis pipeline (§5): per job (once) — get description, closed detection, job extraction;
@@ -139,6 +139,13 @@ const modelLabel = (r: { model: { display_name: string }; usedFallback: boolean 
 
 // ---- Per job --------------------------------------------------------------------------------
 
+/** Store a description the fetch ladder (or the human pass) read: structured data first, then the text. */
+export function saveFetchedPage(jobId: number, sourceKey: string, res: Extract<FetchResult, { kind: 'text' }>): void {
+  if (res.raw) applyFetchedJob(jobId, { ...res.raw, descriptionText: res.text }, res.rawSourceKey ?? sourceKey);
+  saveFetchedText(jobId, res.text);
+  setTitleIfMissing(jobId, res.pageTitle);
+}
+
 export async function prepareJob(jobId: number, deps: StepDeps, taxonomy: Taxonomy): Promise<StepResult<PrepareOutcome>> {
   let job = getJobForAnalysis(jobId);
   if (!job) throw new Error('The job was deleted.');
@@ -155,12 +162,10 @@ export async function prepareJob(jobId: number, deps: StepDeps, taxonomy: Taxono
       return { outcome: 'closed', costUsd: 0, detail: res.reason };
     }
     if (res.kind === 'unreadable') {
-      markUnreadable(jobId, job.url, res.reason);
+      markUnreadable(jobId, job.url, res.reason, res.block);
       return { outcome: 'needs_text', costUsd: 0, detail: res.reason };
     }
-    if (res.raw) applyFetchedJob(jobId, { ...res.raw, descriptionText: res.text }, res.rawSourceKey ?? job.sourceKey);
-    saveFetchedText(jobId, res.text);
-    setTitleIfMissing(jobId, res.pageTitle);
+    saveFetchedPage(jobId, job.sourceKey, res);
     freshVia = res.via;
     job = getJobForAnalysis(jobId)!;
   }

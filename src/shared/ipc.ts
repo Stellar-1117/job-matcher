@@ -6,6 +6,7 @@ import { ResumeParsedSchema } from './llm-schemas';
 import { AnalyzeParamsSchema, MIN_PASTED_TEXT, type AnalysisRow, type AnalyzeEstimate, type AnalyzeProgress, type UnreadableDomain } from './analysis';
 import { ExportOptionsSchema, JOB_STATUSES, type JobStatus, type ResultDetail, type ResultsList, type TailoredDetail, type TailoredSummary, type TailorEstimate } from './results';
 import type { UsageSummary } from './usage';
+import { PASS_WINDOWS_DEFAULT, PASS_WINDOWS_MAX, type HumanPassJob, type HumanPassState, type SiteSession } from './sites';
 import { PreferencesSchema, type ParseStatus, type ProfileDetail, type ProfileSummary, type ResumeDetail } from './profile';
 import {
   ModelInputSchema,
@@ -120,6 +121,22 @@ export const ipcContract = {
   'analyze:results': channel<AnalysisRow[]>()(z.object({ runId: id })),
   'analyze:unreadableDomains': channel<UnreadableDomain[]>()(empty),
 
+  /** Links waiting for a person (bot check or sign-in), in the order the human pass opens them. */
+  'sites:humanQueue': channel<HumanPassJob[]>()(empty),
+  'sites:passState': channel<HumanPassState>()(empty),
+  /** Open the waiting links one by one in a visible window (all, or just `jobIds`). */
+  'sites:passStart': channel<HumanPassState>()(
+    z.object({ jobIds: z.array(id).max(100_000).nullable().default(null), windows: z.number().int().min(1).max(PASS_WINDOWS_MAX).default(PASS_WINDOWS_DEFAULT) }),
+  ),
+  /** Skip the link one window is on (`jobId`), or every window's when null. */
+  'sites:passSkip': channel<{ ok: true }>()(z.object({ jobId: id.nullable().default(null) })),
+  'sites:passStop': channel<{ ok: true }>()(empty),
+  /** A visible window on the site session, to sign in or sign up; the cookies are kept for later fetches. */
+  'sites:openSignIn': channel<{ ok: true }>()(z.object({ url: z.string().trim().url().max(2000) })),
+  'sites:sessions': channel<SiteSession[]>()(empty),
+  /** Sign out of one site (forget its cookies), or of every site when `domain` is null. */
+  'sites:clear': channel<SiteSession[]>()(z.object({ domain: z.string().min(1).max(255).nullable() })),
+
   'usage:summary': channel<UsageSummary>()(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).nullable() })),
 
   'results:list': channel<ResultsList>()(z.object({ profileId: id })),
@@ -157,6 +174,7 @@ export interface IpcEvents {
   'jobs:updated': { count: number };
   /** One tailored resume changed state; `status` is the job's status for that profile when the change affected it. */
   'tailor:progress': { summary: TailoredSummary; status: JobStatus | null };
+  'sites:pass': HumanPassState;
 }
 export type IpcEventName = keyof IpcEvents;
 

@@ -429,6 +429,25 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: 12,
+    name: 'fetch_block',
+    up: (db) => {
+      // Unreadable pages that need a person (bot check or sign-in) wait for the human pass.
+      db.exec(`
+        ALTER TABLE jobs ADD COLUMN fetch_block TEXT;
+        UPDATE jobs SET fetch_block = 'login'
+        WHERE fetch_status = 'unreadable' AND fetch_error LIKE '%login wall%';
+        UPDATE jobs SET fetch_block = 'bot_check'
+        WHERE fetch_status = 'unreadable' AND fetch_block IS NULL
+          AND (fetch_error LIKE '%HTTP 403%' OR fetch_error LIKE '%HTTP 429%' OR fetch_error LIKE '%bot check%')
+          AND canonical_url NOT LIKE '%smartrecruiters.com/%';
+        -- SmartRecruiters links are read through its API now: fetch them again.
+        UPDATE jobs SET fetch_status = 'pending', fetch_error = NULL
+        WHERE fetch_status = 'unreadable' AND is_closed = 0 AND canonical_url LIKE 'https://jobs.smartrecruiters.com/%';
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database, migrations: Migration[] = MIGRATIONS): number[] {

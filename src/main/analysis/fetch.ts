@@ -6,11 +6,13 @@ import { parseRelativePosted, toIso } from '../sources/dates';
 import { isZipRecruiterUrl, parseZipRecruiterPage } from '../sources/ziprecruiter';
 import { extractJsonLdJobPostings, readabilityText } from '../sources/html';
 import type { RawJob } from '../sources/types';
+import type { FetchBlock } from '@shared/sites';
 import { closedPhrase, expiredByValidThrough, isGenericCareersRedirect } from './closed';
 
 /**
  * The fetch ladder (§3.3): ATS API → plain HTTP (JSON-LD, then Readability) → hidden browser
- * window → unreadable (needs a manual paste). Closed postings are recognised on the way.
+ * window → unreadable (needs a manual paste). Closed postings are recognised on the way. Pages
+ * where the site asks for a person (bot check, sign-in) are marked so they wait for the human pass.
  */
 
 export interface RenderedPage {
@@ -19,6 +21,8 @@ export interface RenderedPage {
   url: string;
   /** HTTP status of the main document, when known. */
   status: number | null;
+  /** The page was still showing a bot check / CAPTCHA when the browser gave up. */
+  challenge?: boolean;
 }
 export type PageRenderer = (url: string, opts: { signal?: AbortSignal }) => Promise<RenderedPage>;
 
@@ -45,7 +49,7 @@ export type FetchResult =
       pageTitle: string | null;
     }
   | { kind: 'closed'; reason: string; via: FetchVia }
-  | { kind: 'unreadable'; reason: string };
+  | { kind: 'unreadable'; reason: string; block: FetchBlock | null };
 
 /** Minimum readable description length; shorter text is treated as "not the job description". */
 export const MIN_TEXT_CHARS = 250;
@@ -54,7 +58,10 @@ export const MIN_TEXT_CHARS = 250;
 export function assessText(text: string): string | null {
   const t = text.replace(/\s+/g, ' ').trim();
   if (!t) return 'no readable text';
-  if (/captcha|verify (?:that )?you are (?:a )?human|are you a robot|unusual traffic|access denied|request (?:was )?blocked|checking your browser|attention required/i.test(t) && t.length < 3000)
+  if (
+    /captcha|verify (?:that )?you are (?:a )?human|confirm you(?:'|’| a)re (?:a )?human|are you a robot|unusual traffic|access denied|request (?:was )?blocked|checking your browser|attention required|performing security verification|quick security check/i.test(t) &&
+    t.length < 3000
+  )
     return 'blocked by a bot check';
   if (/(?:sign|log) ?in (?:to|with) (?:view|see|continue|apply|access)|join (?:linkedin|now) to (?:see|view)|create an account to (?:view|see|apply)|please (?:sign|log) ?in/i.test(t) && t.length < 2500)
     return 'behind a login wall';
@@ -63,7 +70,14 @@ export function assessText(text: string): string | null {
   return null;
 }
 
-type PageRead = { kind: 'text' | 'closed'; result: FetchResult } | { kind: 'weak'; reason: string };
+export type PageRead = { kind: 'text' | 'closed'; result: FetchResult } | { kind: 'weak'; reason: string; block: FetchBlock | null };
+
+/** Did the site ask for a person? From the status, the browser's challenge flag and the text problem. */
+function blockOf(page: RenderedPage, problem: string | null): FetchBlock | null {
+  if (problem === 'behind a login wall' || page.status === 401) return 'login';
+  if (page.challenge || page.status === 403 || page.status === 429 || problem === 'blocked by a bot check') return 'bot_check';
+  return null;
+}
 
 /**
  * Work mode a page states outside the description: Welcome to the Jungle puts it in the page title
@@ -85,14 +99,16 @@ export function pageWorkMode(html: string, pageUrl: string, jsonLdRemote: boolea
   return jsonLdRemote ? 'Remote' : null;
 }
 
-/** Interpret one loaded page (from plain HTTP or the browser). */
-async function readPage(requested: string, page: RenderedPage, via: 'http' | 'browser', now: Date): Promise<PageRead> {
+/** Interpret one loaded page (from plain HTTP, the hidden browser or the human-pass window). */
+export async function readPage(requested: string, page: RenderedPage, via: 'http' | 'browser', now: Date): Promise<PageRead> {
   const label = via === 'http' ? 'page' : 'browser';
   if (page.status === 404 || page.status === 410) return { kind: 'closed', result: { kind: 'closed', via, reason: `The posting page returns HTTP ${page.status}` } };
   if (isGenericCareersRedirect(requested, page.url)) {
     return { kind: 'closed', result: { kind: 'closed', via, reason: `The link now redirects to ${page.url} (a careers listing) — the posting was probably taken down` } };
   }
-  if (page.status != null && page.status >= 400) return { kind: 'weak', reason: `${label}: HTTP ${page.status}` };
+  if (page.status != null && page.status >= 400) return { kind: 'weak', reason: `${label}: HTTP ${page.status}`, block: blockOf(page, null) };
+  // Whatever text shows around a bot check (a site's "About us" behind the dialog) isn't the posting.
+  if (page.challenge) return { kind: 'weak', reason: `${label}: blocked by a bot check`, block: 'bot_check' };
 
   const posting = extractJsonLdJobPostings(page.html, page.url).find((p) => p.descriptionText && p.title);
   if (posting) {
@@ -149,7 +165,7 @@ async function readPage(requested: string, page: RenderedPage, via: 'http' | 'br
   const phrase = closedPhrase(r.text) ?? closedPhrase(bodyText(page.html));
   if (phrase) return { kind: 'closed', result: { kind: 'closed', via, reason: `The page says "${phrase}"` } };
   const problem = assessText(r.text);
-  if (problem) return { kind: 'weak', reason: `${label}: ${problem}` };
+  if (problem) return { kind: 'weak', reason: `${label}: ${problem}`, block: blockOf(page, problem) };
   return { kind: 'text', result: { kind: 'text', text: r.text, via, raw: null, rawSourceKey: null, pageTitle: r.title } };
 }
 
@@ -161,6 +177,33 @@ function bodyText(html: string): string {
 }
 
 const isAbort = (e: unknown, signal?: AbortSignal) => !!signal?.aborted || (e as Error)?.name === 'AbortError';
+
+/**
+ * Sites that just asked the hidden browser for a person. The next pages from the same site skip the
+ * browser for a while (a bot check would only time out again) and go straight to the human pass.
+ */
+const BLOCKED_FOR_MS = 15 * 60_000;
+const blockedHosts = new Map<string, { block: FetchBlock; until: number }>();
+
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+/** The human pass got through on this site: let the hidden browser try it again. */
+export function clearBlockedHost(host: string): void {
+  blockedHosts.delete(host);
+}
+
+export function resetBlockedHosts(): void {
+  blockedHosts.clear();
+}
+
+/** Single-page apps that keep the posting in the hash route (#/jobs/123): the server never sees it. */
+const isHashRoute = (url: string) => /#!?\//.test(url);
 
 export async function fetchDescription(url: string, deps: FetchDeps): Promise<FetchResult> {
   const { signal, now } = deps;
@@ -189,30 +232,48 @@ export async function fetchDescription(url: string, deps: FetchDeps): Promise<Fe
     }
   }
 
-  // 2. Plain HTTP GET → JSON-LD JobPosting → Readability.
-  try {
-    const res = await deps.http.getText(url, { signal, allowErrorStatus: true });
-    const read = await readPage(url, { html: res.text, url: res.url, status: res.status }, 'http', now);
-    if (read.kind !== 'weak') return read.result;
-    problems.push(read.reason);
-  } catch (e) {
-    if (isAbort(e, signal)) throw e;
-    problems.push(`page: ${(e as Error).message}`);
-  }
-
-  // 3. Hidden browser window for JavaScript-rendered pages.
-  if (deps.render) {
+  // 2. Plain HTTP GET → JSON-LD JobPosting → Readability (not for hash-route pages: the server would send the app's front page).
+  let httpBlock: FetchBlock | null = null;
+  if (!isHashRoute(url)) {
     try {
-      const page = await deps.render(url, { signal });
-      const read = await readPage(url, page, 'browser', now);
+      const res = await deps.http.getText(url, { signal, allowErrorStatus: true });
+      const read = await readPage(url, { html: res.text, url: res.url, status: res.status }, 'http', now);
       if (read.kind !== 'weak') return read.result;
       problems.push(read.reason);
+      httpBlock = read.block;
     } catch (e) {
       if (isAbort(e, signal)) throw e;
-      problems.push(`browser: ${(e as Error).message}`);
+      problems.push(`page: ${(e as Error).message}`);
     }
   }
 
-  // 4. Give up: the job goes to the "Needs manual paste" queue.
-  return { kind: 'unreadable', reason: problems.join(' · ') || 'no readable text' };
+  // 3. Hidden browser window for JavaScript-rendered pages.
+  let block: FetchBlock | null = null;
+  if (deps.render) {
+    const host = hostOf(url);
+    const known = blockedHosts.get(host);
+    if (known && known.until > now.getTime()) {
+      problems.push(`browser: skipped — ${host} asked for a ${known.block === 'login' ? 'sign-in' : 'bot check'} a moment ago`);
+      block = known.block;
+    } else {
+      try {
+        const page = await deps.render(url, { signal });
+        const read = await readPage(url, page, 'browser', now);
+        if (read.kind !== 'weak') {
+          blockedHosts.delete(host);
+          return read.result;
+        }
+        problems.push(read.reason);
+        // A blocked plain fetch plus a nearly empty browser page is a block too (the browser got the block page).
+        block = read.block ?? (httpBlock && /too short|no readable text/.test(read.reason) ? httpBlock : null);
+        if (block) blockedHosts.set(host, { block, until: now.getTime() + BLOCKED_FOR_MS });
+      } catch (e) {
+        if (isAbort(e, signal)) throw e;
+        problems.push(`browser: ${(e as Error).message}`);
+      }
+    }
+  }
+
+  // 4. Give up: the job goes to the "Needs manual paste" queue (and, when a person can get through, to the human pass).
+  return { kind: 'unreadable', reason: problems.join(' · ') || 'no readable text', block };
 }

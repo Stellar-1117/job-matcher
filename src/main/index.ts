@@ -14,9 +14,9 @@ import { appEvents } from './events';
 import type { IpcEventName } from '@shared/ipc';
 import { redactSecrets } from './redact';
 
-const FORWARDED_EVENTS: IpcEventName[] = ['usage:logged', 'resume:updated', 'analyze:progress', 'jobs:updated', 'tailor:progress'];
+const FORWARDED_EVENTS: IpcEventName[] = ['usage:logged', 'resume:updated', 'analyze:progress', 'jobs:updated', 'tailor:progress', 'sites:pass'];
 
-/** App windows (not the hidden fetch windows of the analysis fetch ladder), which receive push events. */
+/** App windows (not the fetch / site windows of the analysis fetch ladder and human pass), which receive push events. */
 const appWindows = new Set<BrowserWindow>();
 
 // Test hook: run against a separate data folder (throwaway DB, no saved keys).

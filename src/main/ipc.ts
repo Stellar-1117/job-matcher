@@ -8,7 +8,9 @@ import { deleteModel, listModels, upsertModel } from './repos/models';
 import { listRoutes, upsertRoute } from './repos/routes';
 import { createPromptVersion, listPrompts, setActivePrompt, updatePromptNotes } from './repos/prompts';
 import { addLinks, deleteJobs, getJobItem, listJobs } from './repos/jobs';
-import { addDescription, listNeedsPaste, listRunAnalyses, listUnreadableDomains, refetchJobs, resetAllUnreadable, resetFetch, savePastedText } from './repos/analysis';
+import { addDescription, listHumanQueue, listNeedsPaste, listRunAnalyses, listUnreadableDomains, refetchJobs, resetAllUnreadable, resetFetch, savePastedText } from './repos/analysis';
+import { humanPassState, skipHumanPassItem, startHumanPass, stopHumanPass } from './runs/humanPass';
+import { clearSiteSession, listSiteSessions, openSiteWindow } from './net/browser';
 import { analyzeState, cancelAnalyze, estimate, resumeAnalyze, startAnalyze } from './runs/analyze';
 import { estimateTailorRun, regenerateTailored, startTailor } from './runs/tailor';
 import { getTailoredDetail, getTailoredPdf, getTailoredToken } from './repos/tailored';
@@ -245,6 +247,28 @@ export function registerIpc(dbPath: string): void {
       return listRunAnalyses(runId, s.weights, s.thresholds);
     },
     'analyze:unreadableDomains': () => listUnreadableDomains(),
+
+    'sites:humanQueue': () => listHumanQueue(),
+    'sites:passState': () => humanPassState(),
+    'sites:passStart': ({ jobIds, windows }) => startHumanPass(jobIds, windows),
+    'sites:passSkip': ({ jobId }) => {
+      skipHumanPassItem(jobId);
+      return { ok: true };
+    },
+    'sites:passStop': () => {
+      stopHumanPass();
+      return { ok: true };
+    },
+    'sites:openSignIn': ({ url }) => {
+      if (!/^https?:\/\//i.test(url)) throw new Error('Only http(s) pages can be opened');
+      openSiteWindow(url, 'Job Matcher — sign in or sign up, then close this window (the session is kept)');
+      return { ok: true };
+    },
+    'sites:sessions': () => listSiteSessions(),
+    'sites:clear': async ({ domain }) => {
+      await clearSiteSession(domain);
+      return listSiteSessions();
+    },
 
     'usage:summary': ({ month }) => usageSummary(month, getSettings().monthlyBudgetUsd),
 

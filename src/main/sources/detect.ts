@@ -64,8 +64,17 @@ export function detectAts(url: string): AtsMatch | null {
     return { ats: 'icims', boardToken: ic[1], jobId };
   }
 
+  // SmartRecruiters: jobs.smartrecruiters.com/{Company}/{postingId}-{slug}, boards at careers.smartrecruiters.com/{Company}
+  if (host === 'jobs.smartrecruiters.com' || host === 'careers.smartrecruiters.com') {
+    if (!segs[0] || SR_NON_COMPANIES.has(segs[0].toLowerCase())) return null;
+    const jobId = segs[1]?.match(/^(\d{6,})(?:-|$)/)?.[1] ?? null;
+    return { ats: 'smartrecruiters', boardToken: segs[0], jobId };
+  }
+
   return null;
 }
+
+const SR_NON_COMPANIES = new Set(['oneclick-ui', 'sr-jobs', 'api', 'static']);
 
 const ICIMS_NON_TENANTS = new Set(['www', 'community', 'developer', 'developers', 'support', 'status', 'login', 'api', 'cdn']);
 
