@@ -62,6 +62,7 @@ function toItem(r: any, extra: string[], analyses: JobProfileAnalysis[]): JobLis
     isClosed: bool(r.is_closed),
     closedReason: r.closed_reason ?? null,
     fetchError: r.fetch_error ?? null,
+    fetchBlock: r.fetch_block ?? null,
     extraUrls: extra,
     lastAddedAt: r.last_added_at ?? null,
     analyses,
@@ -69,7 +70,7 @@ function toItem(r: any, extra: string[], analyses: JobProfileAnalysis[]): JobLis
 }
 
 const LIST_COLUMNS = `id, canonical_url, source_key, company_id, company_name, title, location_raw, posted_at, posted_at_source,
-  first_seen_at, last_seen_at, last_added_at, fetch_status, is_closed, closed_reason, fetch_error, has_description`;
+  first_seen_at, last_seen_at, last_added_at, fetch_status, is_closed, closed_reason, fetch_error, fetch_block, has_description`;
 
 function extraUrlsByJob(): Map<number, string[]> {
   const rows = getDb().prepare('SELECT job_id, url FROM job_urls ORDER BY id').all() as { job_id: number; url: string }[];

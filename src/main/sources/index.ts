@@ -6,6 +6,7 @@ import { leverAdapter } from './adapters/lever';
 import { ashbyAdapter } from './adapters/ashby';
 import { workdayAdapter } from './adapters/workday';
 import { icimsAdapter } from './adapters/icims';
+import { smartRecruitersAdapter } from './adapters/smartrecruiters';
 import { genericAdapter } from './adapters/generic';
 import type { HttpClient } from '../net/http';
 import type { AdapterKey, SourceAdapter } from './types';
@@ -16,6 +17,7 @@ export const ADAPTERS: Record<AdapterKey, SourceAdapter> = {
   ashby: ashbyAdapter,
   workday: workdayAdapter,
   icims: icimsAdapter,
+  smartrecruiters: smartRecruitersAdapter,
   generic: genericAdapter,
 };
 
@@ -33,6 +35,7 @@ export function detectEmbeddedAts(html: string): { atsType: AdapterKey; boardTok
     ['ashby', /jobs\.ashbyhq\.com\/([A-Za-z0-9_.%-]+)/, (m) => `https://jobs.ashbyhq.com/${m[1]}`],
     ['workday', /([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([A-Za-z0-9_-]+)/, (m) => `https://${m[1]}.${m[2]}.myworkdayjobs.com/${m[3]}`],
     ['icims', /([a-z0-9-]+)\.icims\.com\/jobs/, (m) => `https://${m[1]}.icims.com/jobs/search?ss=1`],
+    ['smartrecruiters', /(?:jobs|careers)\.smartrecruiters\.com\/([A-Za-z0-9_-]+)/, (m) => `https://careers.smartrecruiters.com/${m[1]}`],
   ];
   for (const [ats, re, toUrl] of patterns) {
     const m = html.match(re);

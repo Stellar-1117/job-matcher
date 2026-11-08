@@ -1,6 +1,6 @@
 import type { HttpClient } from '../net/http';
 
-export type AtsKey = 'greenhouse' | 'lever' | 'ashby' | 'workday' | 'icims';
+export type AtsKey = 'greenhouse' | 'lever' | 'ashby' | 'workday' | 'icims' | 'smartrecruiters';
 export type AdapterKey = AtsKey | 'generic';
 
 export type PostedAtSource = 'source' | 'source_republish' | 'relative' | 'first_seen';

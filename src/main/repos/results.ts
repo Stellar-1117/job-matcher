@@ -17,6 +17,8 @@ import {
 import { getModel } from './models';
 import { getRoute } from './routes';
 import { getActivePrompt } from './prompts';
+import { listTailoredForProfile, readyTokens } from './tailored';
+import { resumeLink } from '../net/resumeLink';
 
 function parseFields(json: string | null): ResultFields | null {
   if (!json) return null;
@@ -78,6 +80,7 @@ export function listResults(profileId: number): ResultsList {
     )
     .all({ p: profileId, r: activeResume }) as any[];
 
+  const tailored = listTailoredForProfile(profileId);
   const route = getRoute('matching');
   const currentModelId = route?.model_id ?? route?.fallback_model_id ?? null;
   return {
@@ -117,6 +120,7 @@ export function listResults(profileId: number): ResultsList {
         promptVersion: r.prompt_version ?? null,
         currentResume: r.resume_id === activeResume,
         analyzedAt: r.updated_at,
+        tailored: tailored.get(r.job_id) ?? [],
       }),
     ),
   };
@@ -185,11 +189,26 @@ export function setFeedback(profileId: number, jobId: number, feedback: -1 | 0 |
     .run(jobId, profileId, feedback, note?.trim() || null, nowIso());
 }
 
+/** A tailored resume is ready: the job is now Tailored, unless it has already been decided (Applied, Rejected). */
+export function markTailored(profileId: number, jobId: number, now = nowIso()): JobStatus {
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO job_profile_status (job_id, profile_id, status, updated_at) VALUES (?, ?, 'tailored', ?)
+     ON CONFLICT(job_id, profile_id) DO UPDATE SET
+       status = CASE WHEN status IN ('applied', 'rejected') THEN status ELSE 'tailored' END,
+       updated_at = excluded.updated_at`,
+  ).run(jobId, profileId, now);
+  return getStatus(profileId, jobId);
+}
+
+/** Exported jobs become Exported, except Tailored ones: they stay Tailored, and the export date is still recorded. */
 export function markExported(profileId: number, jobIds: number[], now = nowIso()): void {
   const db = getDb();
   const stmt = db.prepare(
     `INSERT INTO job_profile_status (job_id, profile_id, status, exported_at, updated_at) VALUES (?, ?, 'exported', ?, ?)
-     ON CONFLICT(job_id, profile_id) DO UPDATE SET status = 'exported', exported_at = excluded.exported_at, updated_at = excluded.updated_at`,
+     ON CONFLICT(job_id, profile_id) DO UPDATE SET
+       status = CASE WHEN status = 'tailored' THEN status ELSE 'exported' END,
+       exported_at = excluded.exported_at, updated_at = excluded.updated_at`,
   );
   db.transaction(() => {
     for (const id of jobIds) stmt.run(id, profileId, now, now);
@@ -199,6 +218,7 @@ export function markExported(profileId: number, jobIds: number[], now = nowIso()
 /** Rows to export, in the order given (the table's order), scored with the current weights. */
 export function exportRows(profileId: number, jobIds: number[], weights: Weights, thresholds: Thresholds, skipExported: boolean): { rows: ExportRow[]; jobIds: number[] } {
   const byJob = new Map(listResults(profileId).rows.map((r) => [r.jobId, r]));
+  const tokens = readyTokens(profileId);
   const rows: ExportRow[] = [];
   const ids: number[] = [];
   for (const id of jobIds) {
@@ -211,6 +231,7 @@ export function exportRows(profileId: number, jobIds: number[], weights: Weights
       company: r.companyName,
       workType: exportWorkType(r.fields?.work_mode, r.location),
       location: r.postingLocation ?? stripWorkMode(r.location),
+      resumeLink: tokens.has(id) ? resumeLink(tokens.get(id)!) : null,
       score: s.total,
       verdict: s.verdict,
       summary: r.summary,

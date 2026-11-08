@@ -49,6 +49,43 @@ function TaxonomyEditor({ settings, save }: { settings: AppSettings; save: (p: P
   );
 }
 
+/** Where other laptops fetch tailored resumes from. */
+function ResumeLinksCard({ settings: s, save }: { settings: AppSettings; save: (p: Partial<AppSettings>) => Promise<void> | void }) {
+  const server = useIpc('tailor:server', {});
+  const [host, setHost] = useState(s.lan.host ?? '');
+  useEffect(() => setHost(s.lan.host ?? ''), [s.lan.host]);
+  const saveLan = async (lan: AppSettings['lan']) => {
+    await save({ lan });
+    server.set(await invoke('tailor:server', {}));
+  };
+  return (
+    <Card title="Resume links">
+      <div className="flex flex-col gap-3">
+        <div className="flex items-end gap-3">
+          <Field label="Port">
+            <NumberInput value={s.lan.port} min={1024} max={65535} onCommit={(v) => void saveLan({ ...s.lan, port: Math.round(v) })} className="w-24" />
+          </Field>
+          <Field label="Address in links" hint="Leave empty to use this PC's network address.">
+            <Input value={host} placeholder="Automatic" onChange={(e) => setHost(e.target.value)} onBlur={() => host.trim() !== (s.lan.host ?? '') && void saveLan({ ...s.lan, host: host.trim() || null })} className="w-48" />
+          </Field>
+        </div>
+        {server.data && (
+          <p className="text-xs text-slate-500">
+            {server.data.listening ? (
+              <>
+                Serving tailored PDFs at <code>{server.data.address}</code>.
+              </>
+            ) : (
+              <span className="text-red-600">Not running: {server.data.error ?? 'starting…'}</span>
+            )}
+          </p>
+        )}
+        <p className="text-xs text-slate-500">Links only work while this PC is on and the app is running. If this PC's address changes, links already shared stop working, so give it a fixed address in your router or set one here.</p>
+      </div>
+    </Card>
+  );
+}
+
 export default function GeneralTab() {
   const settings = useIpc('settings:get', {});
   const action = useAction();
@@ -140,6 +177,8 @@ export default function GeneralTab() {
           </div>
         </Card>
       </div>
+
+      <ResumeLinksCard settings={s} save={save} />
 
       <TaxonomyEditor settings={s} save={save} />
     </div>

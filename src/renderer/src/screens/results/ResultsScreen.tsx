@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { createColumnHelper, flexRender, getCoreRowModel, getSortedRowModel, useReactTable, type SortingState } from '@tanstack/react-table';
 import type { AnalyzeProgress } from '@shared/analysis';
-import { JOB_STATUSES, JOB_STATUS_LABELS, scoreRow, type JobStatus, type ResultsList } from '@shared/results';
+import { JOB_STATUSES, JOB_STATUS_LABELS, pageCountChanged, scoreRow, type JobStatus, type ResultsList, type TailoredSummary } from '@shared/results';
 import { DEFAULT_FILTERS, activeFilterCount, applyFilters, yearlySalary, type ResultFilters, type ScoredRow } from '@shared/resultFilters';
 import { SUB_SCORE_KEYS, SUB_SCORE_LABELS, VERDICT_LABELS } from '@shared/scoring';
 import { invoke, useIpc, useIpcEvent } from '../../api';
@@ -39,6 +39,7 @@ function saveProfileId(id: number): void {
 const STATUS_TONES: Record<JobStatus, 'slate' | 'indigo' | 'blue' | 'green' | 'amber' | 'red'> = {
   new: 'indigo',
   selected: 'blue',
+  tailored: 'amber',
   exported: 'green',
   applied: 'green',
   rejected: 'red',
@@ -59,6 +60,81 @@ function MiniBars({ row }: { row: ScoredRow }) {
 
 const col = createColumnHelper<ScoredRow>();
 
+/** The tailored resume a row shows: the one picked in its dropdown, else the current profile's, else the first. */
+function shownTailored(row: ScoredRow, profileId: number | null, picked: number | undefined): TailoredSummary | null {
+  return row.tailored.find((t) => t.profileId === picked) ?? row.tailored.find((t) => t.profileId === profileId) ?? row.tailored[0] ?? null;
+}
+
+function ResumeCell({
+  row,
+  profileId,
+  picked,
+  onPick,
+  onRetry,
+  onDownload,
+  onCopyLink,
+}: {
+  row: ScoredRow;
+  profileId: number | null;
+  picked: number | undefined;
+  onPick: (profileId: number) => void;
+  onRetry: (profileId: number) => void;
+  onDownload: (profileId: number) => void;
+  onCopyLink: (profileId: number) => void;
+}) {
+  const t = shownTailored(row, profileId, picked);
+  if (!t) return <span className="text-xs text-slate-300">—</span>;
+  const busy = t.state === 'queued' || t.state === 'running';
+  const warnings = [
+    pageCountChanged(t) && `The PDF has ${t.pagesTailored} pages; the original has ${t.pagesOriginal}.`,
+    !t.currentResume && 'Made from an older resume version.',
+    t.state === 'ready' && t.changeCount === 0 && 'Nothing was changed: this PDF matches the original.',
+  ].filter(Boolean);
+  return (
+    <div className="flex flex-col items-start gap-1">
+      {row.tailored.length > 1 && (
+        <Select value={t.profileId} onChange={(e) => onPick(Number(e.target.value))} className="w-full py-0.5 text-xs" title="Resumes made for this job">
+          {row.tailored.map((o) => (
+            <option key={o.profileId} value={o.profileId}>
+              {o.profileName}
+            </option>
+          ))}
+        </Select>
+      )}
+      {busy && (
+        <span className="flex items-center gap-1 text-xs text-slate-500">
+          <Spinner /> {t.state === 'queued' ? 'Queued' : 'Tailoring'}
+        </span>
+      )}
+      {t.state === 'failed' && (
+        <span className="flex items-center gap-1 text-xs">
+          <span className="text-red-700" title={t.error ?? ''}>
+            Failed
+          </span>
+          <button type="button" className="font-medium text-indigo-700 hover:underline" onClick={() => onRetry(t.profileId)}>
+            Retry
+          </button>
+        </span>
+      )}
+      {t.hasPdf && (
+        <span className="flex flex-wrap items-center gap-x-2 text-xs">
+          <button type="button" className="font-medium text-indigo-700 hover:underline" onClick={() => onDownload(t.profileId)}>
+            Download
+          </button>
+          <button type="button" className="font-medium text-indigo-700 hover:underline" onClick={() => onCopyLink(t.profileId)}>
+            Copy link
+          </button>
+          {warnings.length > 0 && (
+            <span className="text-amber-600" title={warnings.join('\n')}>
+              ⚠
+            </span>
+          )}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
   const profiles = useIpc('profiles:list', {});
   const settings = useIpc('settings:get', {});
@@ -78,6 +154,8 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState<AnalyzeProgress | null>(null);
   const [showFilters, setShowFilters] = useState(true);
+  // Row → the profile picked in its resume dropdown, when more than one profile tailored the job.
+  const [pickedTailor, setPickedTailor] = useState<Map<number, number>>(new Map());
   const action = useAction();
   const confirm = useConfirm();
 
@@ -127,6 +205,21 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
     if (p.status !== 'running' && profileId != null) void load(profileId);
   });
 
+  useIpcEvent('tailor:progress', ({ summary, status }) => {
+    setList((l) => {
+      if (!l) return l;
+      return {
+        ...l,
+        rows: l.rows.map((r) => {
+          if (r.jobId !== summary.jobId) return r;
+          const others = r.tailored.filter((t) => t.profileId !== summary.profileId);
+          const tailored = [...others, summary].sort((a, b) => a.profileName.localeCompare(b.profileName));
+          return { ...r, tailored, status: status && summary.profileId === l.profileId ? status : r.status };
+        }),
+      };
+    });
+  });
+
   const s = settings.data;
   // Totals and verdicts come from the stored sub-scores and the current weights — no LLM involved.
   const scored = useMemo<ScoredRow[]>(() => (list && s ? list.rows.map((r) => ({ ...r, ...scoreRow(r, s.weights, s.thresholds) })) : []), [list, s]);
@@ -157,6 +250,7 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
       col.accessor((r) => r.sourceLabel.toLowerCase(), { id: 'source', header: 'Source', sortingFn: 'alphanumeric' }),
       col.accessor((r) => JOB_STATUSES.indexOf(r.status), { id: 'status', header: 'Status', meta: { className: 'w-[5.5rem]' } }),
       col.display({ id: 'bars', header: 'Sub-scores', enableSorting: false, meta: { className: 'w-[4.5rem]' } }),
+      col.display({ id: 'resume', header: 'Resume', enableSorting: false, meta: { className: 'w-[8.5rem]' } }),
     ],
     [],
   );
@@ -218,6 +312,52 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
       if (!ok) return;
       await invoke('analyze:start', { params, budgetOverride: est.exceedsBudget });
       setNotice(`Re-analyzing ${ids.length} job${ids.length === 1 ? '' : 's'}… results refresh when it finishes.`);
+    });
+
+  const tailor = (ids: number[]) =>
+    action.run(async () => {
+      if (profileId == null || !ids.length) return;
+      const est = await invoke('tailor:estimate', { profileId, jobIds: ids });
+      if (est.resumeProblem) throw new Error(est.resumeProblem);
+      const skipped = [
+        est.alreadyTailored > 0 && `${est.alreadyTailored} already tailored for ${est.profileName} (use Regenerate to redo one)`,
+        est.notMatched > 0 && `${est.notMatched} without a full match for this profile`,
+      ].filter(Boolean);
+      if (!est.toTailor) {
+        setNotice(`Nothing to tailor: ${skipped.join(', ')}.`);
+        return;
+      }
+      const ok = await confirm({
+        title: `Tailor ${est.toTailor} resume${est.toTailor === 1 ? '' : 's'} for ${est.profileName}?`,
+        message: (
+          <>
+            About {usd(est.totalUsd)} with {est.task.model ?? 'the routed model'}.{skipped.length > 0 && ` Skipping ${skipped.join(' and ')}.`}
+            {est.exceedsBudget && <span className="font-medium text-red-600"> This goes over your monthly budget.</span>}
+          </>
+        ),
+        confirmLabel: est.exceedsBudget ? 'Tailor anyway' : 'Tailor',
+        danger: est.exceedsBudget,
+      });
+      if (!ok) return;
+      await invoke('tailor:start', { profileId, jobIds: ids, budgetOverride: est.exceedsBudget });
+    });
+
+  const regenerate = (jobId: number, pid: number) =>
+    action.run(async () => {
+      await invoke('tailor:regenerate', { profileId: pid, jobId });
+    });
+
+  const downloadResume = (jobId: number, pid: number) =>
+    action.run(async () => {
+      const res = await invoke('tailor:download', { profileId: pid, jobId });
+      if (res.path) setNotice(`Saved to ${res.path}`);
+    });
+
+  const copyResumeLink = (jobId: number, pid: number) =>
+    action.run(async () => {
+      const { link } = await invoke('tailor:link', { profileId: pid, jobId });
+      await invoke('app:copyText', { text: link });
+      setNotice(`Copied ${link}`);
     });
 
   const feedback = (row: ScoredRow, fb: -1 | 0 | 1, note: string | null) =>
@@ -333,6 +473,9 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
           <Button size="sm" disabled={!selectedIds.length || action.busy || !!analyzing} onClick={() => void reanalyze(selectedIds)}>
             Re-analyze
           </Button>
+          <Button size="sm" disabled={!selectedIds.length || action.busy} onClick={() => void tailor(selectedIds)} title={`Make a resume tailored to each selected job, from ${profileName || 'this profile'}'s active DOCX`}>
+            Tailor resume
+          </Button>
           <Button size="sm" variant="primary" disabled={!selectedIds.length} onClick={() => setExporting(true)}>
             Export…
           </Button>
@@ -362,7 +505,7 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
               <p className="mb-2 text-xs text-slate-500">
                 Click a row for details · drag down the checkboxes to select a run · Shift-click for a range · Ctrl-click a row to toggle it.
               </p>
-              <table className="w-full min-w-[880px] table-fixed border-separate border-spacing-0 text-sm">
+              <table className="w-full min-w-[1000px] table-fixed border-separate border-spacing-0 text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-50">
                   {table.getHeaderGroups().map((hg) => (
                     <tr key={hg.id}>
@@ -485,6 +628,17 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
                           <td className="border-b border-slate-100 p-2">
                             <MiniBars row={r} />
                           </td>
+                          <td className="border-b border-slate-100 p-2">
+                            <ResumeCell
+                              row={r}
+                              profileId={profileId}
+                              picked={pickedTailor.get(r.jobId)}
+                              onPick={(pid) => setPickedTailor((m) => new Map(m).set(r.jobId, pid))}
+                              onRetry={(pid) => void regenerate(r.jobId, pid)}
+                              onDownload={(pid) => void downloadResume(r.jobId, pid)}
+                              onCopyLink={(pid) => void copyResumeLink(r.jobId, pid)}
+                            />
+                          </td>
                         </tr>
                         {isOpen && list && s && (
                           <tr>
@@ -495,8 +649,10 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
                                 list={list}
                                 weights={s.weights}
                                 feedbackEnabled={s.feedbackEnabled}
+                                tailorProfileId={shownTailored(r, profileId, pickedTailor.get(r.jobId))?.profileId ?? list.profileId}
                                 onStatus={(st) => void setStatus([r.jobId], st)}
                                 onReanalyze={() => void reanalyze([r.jobId])}
+                                onRegenerate={(jobId, pid) => void regenerate(jobId, pid)}
                                 onFeedback={(fb, note) => void feedback(r, fb, note)}
                               />
                             </td>
@@ -523,7 +679,10 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
           onDone={(ids, msg) => {
             setExporting(false);
             setNotice(msg);
-            patchRows(ids, { status: 'exported', exportedAt: new Date().toISOString() });
+            // Same rule as the main process: Tailored jobs stay Tailored.
+            const exportedAt = new Date().toISOString();
+            const set = new Set(ids);
+            setList((l) => (l ? { ...l, rows: l.rows.map((r) => (set.has(r.jobId) ? { ...r, exportedAt, status: r.status === 'tailored' ? r.status : 'exported' } : r)) } : l));
           }}
         />
       )}

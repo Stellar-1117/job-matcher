@@ -180,8 +180,8 @@ describe('results list', () => {
 
 describe('export', () => {
   const rows = [
-    { url: 'https://a.com/1', title: 'Backend, Senior', company: 'Acme "A"', workType: 'Hybrid', location: 'New York, NY', score: 82, verdict: 'strong' as const, summary: 'Line one\nline two' },
-    { url: 'https://b.com/2', title: 'Platform', company: 'Beta', workType: null, location: null, score: null, verdict: null, summary: null },
+    { url: 'https://a.com/1', title: 'Backend, Senior', company: 'Acme "A"', workType: 'Hybrid', location: 'New York, NY', resumeLink: 'http://pc:47821/r/abc', score: 82, verdict: 'strong' as const, summary: 'Line one\nline two' },
+    { url: 'https://b.com/2', title: 'Platform', company: 'Beta', workType: null, location: null, resumeLink: null, score: null, verdict: null, summary: null },
   ];
 
   it('txt: one URL per line by default, optional columns', () => {
@@ -191,14 +191,14 @@ describe('export', () => {
 
   it('csv: header, quoting, BOM', () => {
     const csv = buildExport(rows, { format: 'csv', include: { title: false, company: false, score: false } });
-    expect(csv.startsWith('﻿company,role,link,work_type,location,score,verdict,summary\r\n')).toBe(true);
-    expect(csv).toContain('"Acme ""A""","Backend, Senior",https://a.com/1,Hybrid,"New York, NY",82,strong,"Line one\nline two"\r\n');
-    expect(csv).toContain('Beta,Platform,https://b.com/2,,,,,\r\n');
+    expect(csv.startsWith('﻿company,role,link,work_type,location,resume_link,score,verdict,summary\r\n')).toBe(true);
+    expect(csv).toContain('"Acme ""A""","Backend, Senior",https://a.com/1,Hybrid,"New York, NY",http://pc:47821/r/abc,82,strong,"Line one\nline two"\r\n');
+    expect(csv).toContain('Beta,Platform,https://b.com/2,,,,,,\r\n');
   });
 
-  it('clipboard rows match the job sheet: Company | Role | Link | Work type | (blank) | Location', () => {
-    expect(buildClipboardTable(rows, false)).toBe('Acme "A"\tBackend, Senior\thttps://a.com/1\tHybrid\t\tNew York, NY\nBeta\tPlatform\thttps://b.com/2\t\t\t\n');
-    expect(buildClipboardTable(rows, true).split('\n')[0]).toBe('Company\tRole\tLink\tWork type\t\tLocation');
+  it('clipboard rows match the job sheet: Company | Role | Link | Work type | (blank) | Location | Resume', () => {
+    expect(buildClipboardTable(rows, false)).toBe('Acme "A"\tBackend, Senior\thttps://a.com/1\tHybrid\t\tNew York, NY\thttp://pc:47821/r/abc\nBeta\tPlatform\thttps://b.com/2\t\t\t\t\n');
+    expect(buildClipboardTable(rows, true).split('\n')[0]).toBe('Company\tRole\tLink\tWork type\t\tLocation\tResume');
   });
 
   it('work type and location are separate columns', () => {
@@ -278,6 +278,7 @@ describe('result filters', () => {
     promptVersion: 1,
     currentResume: true,
     analyzedAt: '2026-09-30T00:00:00Z',
+    tailored: [],
     total: 80,
     verdict: 'strong',
     ...over,

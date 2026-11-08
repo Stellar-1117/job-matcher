@@ -1,6 +1,7 @@
 /** Job list types and source labels shared by main and renderer. */
 
 import type { Verdict } from './scoring';
+import type { FetchBlock } from './sites';
 
 export const FETCH_STATUSES = ['pending', 'fetched', 'unreadable', 'manual_text'] as const;
 export type FetchStatus = (typeof FETCH_STATUSES)[number];
@@ -52,6 +53,8 @@ export interface JobListItem {
   closedReason: string | null;
   /** Why the fetch ladder couldn't read the page (fetch status "unreadable"). */
   fetchError: string | null;
+  /** The site asked for a person (bot check or sign-in): the job waits for the human pass. */
+  fetchBlock: FetchBlock | null;
   /** Other URLs that were merged into this job (dedupe). */
   extraUrls: string[];
   /** When the link or description was last pasted (new or already saved); null for jobs from older collection runs. */
@@ -83,6 +86,7 @@ const ATS_LABELS: Record<string, string> = {
   ashby: 'Ashby',
   workday: 'Workday',
   icims: 'iCIMS',
+  smartrecruiters: 'SmartRecruiters',
   generic: 'Company site',
 };
 

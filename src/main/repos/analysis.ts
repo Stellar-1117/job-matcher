@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { getDb, nowIso } from '../db';
 import { StoredJobExtractionSchema, isLegacyExtraction, type JobExtraction, type MatchResult } from '@shared/llm-schemas';
 import type { AnalysisRow, AnalyzeItemError, ItemStatus, UnreadableDomain } from '@shared/analysis';
+import type { FetchBlock, HumanPassJob } from '@shared/sites';
 import type { HardFilterOutcome } from '@shared/hardFilters';
 import { computeTotal, computeVerdict, type Thresholds, type Weights } from '@shared/scoring';
 import { DESCRIPTION_SOURCE_KEY, jobLink, type AddDescriptionResult, type JobListItem, type NeedsPasteJob } from '@shared/jobs';
@@ -45,7 +46,7 @@ export function getJobForAnalysis(id: number): JobForAnalysis | null {
 
 export function saveFetchedText(jobId: number, text: string, now = nowIso()): void {
   getDb()
-    .prepare("UPDATE jobs SET description_text = ?, fetch_status = 'fetched', fetch_error = NULL, fetched_at = ?, updated_at = ? WHERE id = ?")
+    .prepare("UPDATE jobs SET description_text = ?, fetch_status = 'fetched', fetch_error = NULL, fetch_block = NULL, fetched_at = ?, updated_at = ? WHERE id = ?")
     .run(text, now, now, jobId);
 }
 
@@ -63,13 +64,16 @@ function domainOf(url: string): string {
   }
 }
 
-/** Fetch ladder gave up (or the text isn't a job page): queue for a manual paste and log the domain (§3.3). */
-export function markUnreadable(jobId: number, url: string, reason: string, now = nowIso()): void {
+/**
+ * Fetch ladder gave up (or the text isn't a job page): queue for a manual paste and log the domain (§3.3).
+ * With `block`, the site asked for a person (bot check or sign-in), so the job also waits for the human pass.
+ */
+export function markUnreadable(jobId: number, url: string, reason: string, block: FetchBlock | null = null, now = nowIso()): void {
   const db = getDb();
   db.transaction(() => {
     db.prepare(
-      "UPDATE jobs SET fetch_status = 'unreadable', fetch_error = ?, description_text = NULL, extraction_id = NULL, fetched_at = ?, updated_at = ? WHERE id = ?",
-    ).run(reason, now, now, jobId);
+      "UPDATE jobs SET fetch_status = 'unreadable', fetch_error = ?, fetch_block = ?, description_text = NULL, extraction_id = NULL, fetched_at = ?, updated_at = ? WHERE id = ?",
+    ).run(reason, block, now, now, jobId);
     db.prepare('INSERT INTO unreadable_log (job_id, domain, url, reason, created_at) VALUES (?, ?, ?, ?, ?)').run(jobId, domainOf(url), url, reason, now);
   })();
 }
@@ -86,7 +90,7 @@ export function savePastedText(jobId: number, text: string, now = nowIso()): voi
   const db = getDb();
   db.transaction(() => {
     const res = db
-      .prepare("UPDATE jobs SET description_text = ?, fetch_status = 'manual_text', fetch_error = NULL, fetched_at = ?, extraction_id = NULL, updated_at = ? WHERE id = ?")
+      .prepare("UPDATE jobs SET description_text = ?, fetch_status = 'manual_text', fetch_error = NULL, fetch_block = NULL, fetched_at = ?, extraction_id = NULL, updated_at = ? WHERE id = ?")
       .run(text, now, now, jobId);
     if (!res.changes) throw new Error('Job not found');
     db.prepare('DELETE FROM job_extractions WHERE job_id = ?').run(jobId);
@@ -146,7 +150,7 @@ export function refetchJobs(ids: number[], now = nowIso()): number {
   let n = 0;
   db.transaction(() => {
     const reset = db.prepare(
-      "UPDATE jobs SET description_text = NULL, fetch_status = 'pending', fetch_error = NULL, extraction_id = NULL, updated_at = ? WHERE id = ? AND fetch_status <> 'manual_text' AND is_closed = 0",
+      "UPDATE jobs SET description_text = NULL, fetch_status = 'pending', fetch_error = NULL, fetch_block = NULL, extraction_id = NULL, updated_at = ? WHERE id = ? AND fetch_status <> 'manual_text' AND is_closed = 0",
     );
     for (const id of ids) {
       if (!reset.run(now, id).changes) continue;
@@ -160,12 +164,27 @@ export function refetchJobs(ids: number[], now = nowIso()): number {
 
 /** Put an unreadable job back to "not fetched" so the next analysis tries the fetch ladder again. */
 export function resetFetch(jobId: number): void {
-  getDb().prepare("UPDATE jobs SET fetch_status = 'pending', fetch_error = NULL WHERE id = ? AND fetch_status = 'unreadable'").run(jobId);
+  getDb().prepare("UPDATE jobs SET fetch_status = 'pending', fetch_error = NULL, fetch_block = NULL WHERE id = ? AND fetch_status = 'unreadable'").run(jobId);
 }
 
 /** Let every unreadable job be fetched again on the next analysis run. Returns how many were reset. */
 export function resetAllUnreadable(): number {
-  return getDb().prepare("UPDATE jobs SET fetch_status = 'pending', fetch_error = NULL WHERE fetch_status = 'unreadable' AND is_closed = 0").run().changes;
+  return getDb().prepare("UPDATE jobs SET fetch_status = 'pending', fetch_error = NULL, fetch_block = NULL WHERE fetch_status = 'unreadable' AND is_closed = 0").run().changes;
+}
+
+/** Jobs waiting for the human pass (all of them, or just `ids`), grouped by site so one passed check covers its neighbours. */
+export function listHumanQueue(ids: number[] | null = null): HumanPassJob[] {
+  const rows = getDb()
+    .prepare("SELECT id, canonical_url, title, company_name, fetch_block FROM jobs WHERE fetch_status = 'unreadable' AND fetch_block IS NOT NULL AND is_closed = 0 ORDER BY updated_at")
+    .all() as { id: number; canonical_url: string; title: string | null; company_name: string | null; fetch_block: FetchBlock }[];
+  const wanted = ids ? new Set(ids) : null;
+  const jobs = rows
+    .filter((r) => !wanted || wanted.has(r.id))
+    .map((r) => ({ jobId: r.id, url: r.canonical_url, title: r.title, companyName: r.company_name, host: domainOf(r.canonical_url), block: r.fetch_block }));
+  // Stable sort by host, keeping the original order within a host.
+  const firstIndex = new Map<string, number>();
+  jobs.forEach((j, i) => firstIndex.has(j.host) || firstIndex.set(j.host, i));
+  return jobs.sort((a, b) => firstIndex.get(a.host)! - firstIndex.get(b.host)!);
 }
 
 export function listNeedsPaste(): NeedsPasteJob[] {

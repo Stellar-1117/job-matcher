@@ -383,6 +383,71 @@ export const MIGRATIONS: Migration[] = [
       db.exec("UPDATE job_profile_status SET status = 'new' WHERE status = 'reviewed'");
     },
   },
+  {
+    id: 10,
+    name: 'tailored_resumes',
+    up: (db) => {
+      // One tailored resume per job × profile. The token is the file's public link, so regenerating keeps it.
+      db.exec(`
+        CREATE TABLE tailored_resumes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+          profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+          resume_id INTEGER REFERENCES resumes(id) ON DELETE SET NULL,
+          state TEXT NOT NULL DEFAULT 'queued',
+          error TEXT,
+          token TEXT NOT NULL UNIQUE,
+          edits_json TEXT,
+          added_skills_json TEXT,
+          dropped_edits INTEGER NOT NULL DEFAULT 0,
+          docx_blob BLOB,
+          pdf_blob BLOB,
+          pages_original INTEGER,
+          pages_tailored INTEGER,
+          prompt_version_id INTEGER,
+          model_id INTEGER,
+          model_name TEXT,
+          cost_usd REAL NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          UNIQUE (job_id, profile_id)
+        );
+        CREATE INDEX idx_tailored_profile ON tailored_resumes(profile_id);
+      `);
+    },
+  },
+  {
+    id: 11,
+    name: 'export_keeps_tailored',
+    up: (db) => {
+      // Exporting no longer turns Tailored jobs into Exported; restore the ones it already did.
+      db.exec(`
+        UPDATE job_profile_status SET status = 'tailored'
+        WHERE status = 'exported' AND EXISTS (
+          SELECT 1 FROM tailored_resumes t WHERE t.job_id = job_profile_status.job_id AND t.profile_id = job_profile_status.profile_id AND t.pdf_blob IS NOT NULL
+        )
+      `);
+    },
+  },
+  {
+    id: 12,
+    name: 'fetch_block',
+    up: (db) => {
+      // Unreadable pages that need a person (bot check or sign-in) wait for the human pass.
+      db.exec(`
+        ALTER TABLE jobs ADD COLUMN fetch_block TEXT;
+        UPDATE jobs SET fetch_block = 'login'
+        WHERE fetch_status = 'unreadable' AND fetch_error LIKE '%login wall%';
+        UPDATE jobs SET fetch_block = 'bot_check'
+        WHERE fetch_status = 'unreadable' AND fetch_block IS NULL
+          AND (fetch_error LIKE '%HTTP 403%' OR fetch_error LIKE '%HTTP 429%' OR fetch_error LIKE '%bot check%')
+          AND canonical_url NOT LIKE '%smartrecruiters.com/%';
+        -- SmartRecruiters links are read through its API now: fetch them again.
+        UPDATE jobs SET fetch_status = 'pending', fetch_error = NULL
+        WHERE fetch_status = 'unreadable' AND is_closed = 0 AND canonical_url LIKE 'https://jobs.smartrecruiters.com/%';
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database, migrations: Migration[] = MIGRATIONS): number[] {

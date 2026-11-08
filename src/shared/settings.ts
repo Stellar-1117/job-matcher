@@ -23,6 +23,8 @@ export const AppSettingsSchema = z.object({
   concurrency: z.number().int().min(1).max(32),
   defaultDateRange: DateRangeSchema,
   defaultSources: z.array(z.string()),
+  /** The server that hands tailored PDFs to other laptops. host = the address put in links; null finds this PC's LAN address. */
+  lan: z.object({ port: z.number().int().min(1024).max(65535), host: z.string().trim().min(1).max(255).nullable() }),
 });
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 export type SettingsKey = keyof AppSettings;
@@ -37,4 +39,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   concurrency: 4,
   defaultDateRange: { preset: 'last7', from: null, to: null },
   defaultSources: [],
+  lan: { port: 47821, host: null },
 };

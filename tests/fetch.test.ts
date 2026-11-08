@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { fakeHttp } from './fakeHttp';
-import { assessText, fetchDescription, type PageRenderer } from '../src/main/analysis/fetch';
+import { assessText, fetchDescription, resetBlockedHosts, type PageRenderer } from '../src/main/analysis/fetch';
 import { closedPhrase, expiredByValidThrough, isGenericCareersRedirect, looksOdd } from '../src/main/analysis/closed';
 
 const NOW = new Date('2026-09-30T12:00:00Z');
@@ -53,6 +53,7 @@ describe('closed rules', () => {
 });
 
 describe('fetch ladder', () => {
+  beforeEach(() => resetBlockedHosts());
   it('uses the ATS API first and treats a 404 there as closed', async () => {
     const http = fakeHttp({
       'https://boards-api.greenhouse.io/v1/boards/acme/jobs/7': JSON.stringify({ id: 7, title: 'Backend Engineer', updated_at: '2026-09-28T00:00:00Z', first_published: '2026-09-20T00:00:00Z', absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/7', content: `&lt;p&gt;${DESC}&lt;/p&gt;` }),

@@ -202,7 +202,7 @@ export default function PromptsTab() {
                 ))}
               </div>
               {unknown.length > 0 && <div className="mt-1 text-xs text-red-600">Unknown variables (left as-is): {unknown.join(', ')}</div>}
-              {missingSchema && ['job_extraction', 'resume_parse', 'matching'].includes(task) && (
+              {missingSchema && ['job_extraction', 'resume_parse', 'matching', 'resume_tailor'].includes(task) && (
                 <div className="mt-1 text-xs text-amber-700">
                   This prompt doesn't include {'{{output_schema}}'}. Output must still validate against the task's schema.
                 </div>

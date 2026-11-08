@@ -15,6 +15,7 @@ export const DEFAULT_TOKENS: Record<TaskEstimate['task'], { input: number; outpu
   job_extraction: { input: 2500, output: 400 },
   pre_score: { input: 1500, output: 150 },
   matching: { input: 5000, output: 900 },
+  resume_tailor: { input: 3500, output: 1500 },
 };
 
 /** History needs a few calls before it's a better guess than the defaults. */
@@ -53,6 +54,14 @@ function taskEstimate(task: TaskEstimate['task'], calls: number): TaskEstimate {
     basis: useHistory ? 'history' : 'default',
     costUsd: perCall * calls,
   };
+}
+
+/** Cost of tailoring `calls` resumes, checked against the monthly budget like an analysis run. */
+export function estimateTailor(calls: number, now: Date): { task: TaskEstimate; totalUsd: number; monthSpentUsd: number; monthlyBudgetUsd: number; exceedsBudget: boolean } {
+  const task = taskEstimate('resume_tailor', calls);
+  const spent = monthSpend(now);
+  const cap = getSettings().monthlyBudgetUsd;
+  return { task, totalUsd: task.costUsd, monthSpentUsd: spent, monthlyBudgetUsd: cap, exceedsBudget: cap > 0 && spent + task.costUsd > cap };
 }
 
 /**

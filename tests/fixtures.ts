@@ -26,6 +26,12 @@ export function makePdf(lines: string[]): Uint8Array {
 
 /** Build a minimal DOCX with one paragraph per entry. */
 export async function makeDocx(paragraphs: string[]): Promise<Uint8Array> {
+  const body = paragraphs.map((p) => `<w:p><w:r><w:t xml:space="preserve">${p.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</w:t></w:r></w:p>`).join('');
+  return makeDocxFromBody(body);
+}
+
+/** Build a DOCX from raw body XML, optionally with extra zip entries. */
+export async function makeDocxFromBody(body: string, extraFiles: Record<string, string> = {}): Promise<Uint8Array> {
   const zip = new JSZip();
   zip.file(
     '[Content_Types].xml',
@@ -35,10 +41,10 @@ export async function makeDocx(paragraphs: string[]): Promise<Uint8Array> {
     '_rels/.rels',
     `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
   );
-  const body = paragraphs.map((p) => `<w:p><w:r><w:t xml:space="preserve">${p.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</w:t></w:r></w:p>`).join('');
   zip.file(
     'word/document.xml',
     `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`,
   );
+  for (const [name, content] of Object.entries(extraFiles)) zip.file(name, content);
   return zip.generateAsync({ type: 'uint8array' });
 }

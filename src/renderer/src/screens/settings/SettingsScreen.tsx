@@ -5,14 +5,16 @@ import ModelsTab from './ModelsTab';
 import RoutingTab from './RoutingTab';
 import PromptsTab from './PromptsTab';
 import GeneralTab from './GeneralTab';
+import SitesTab from './SitesTab';
 
-export type SettingsTab = 'keys' | 'models' | 'routing' | 'prompts' | 'general';
+export type SettingsTab = 'keys' | 'models' | 'routing' | 'prompts' | 'sites' | 'general';
 
 const TABS: { key: SettingsTab; label: string }[] = [
   { key: 'keys', label: 'API keys' },
   { key: 'models', label: 'Model registry' },
   { key: 'routing', label: 'Task routing' },
   { key: 'prompts', label: 'Prompts' },
+  { key: 'sites', label: 'Site sign-ins' },
   { key: 'general', label: 'General' },
 ];
 
@@ -30,6 +32,7 @@ export default function SettingsScreen({ initialTab = 'keys' }: { initialTab?: S
         {tab === 'models' && <ModelsTab />}
         {tab === 'routing' && <RoutingTab />}
         {tab === 'prompts' && <PromptsTab />}
+        {tab === 'sites' && <SitesTab />}
         {tab === 'general' && <GeneralTab />}
       </div>
     </div>

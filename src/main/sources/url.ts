@@ -70,6 +70,8 @@ export function normalizeUrl(raw: string): NormalizeResult {
   if (!u.hostname.includes('.')) return { ok: false, reason: 'Not a public web address' };
 
   u.protocol = 'https:';
+  // JobDiva portals are single-page apps: the posting is in the hash route (#/jobs/{id}); without it the link is the portal's front page.
+  const jobDivaRoute = /(^|\.)jobdiva\.com$/i.test(u.hostname) ? u.hash.match(/^#\/jobs\/\d+/)?.[0] ?? '' : '';
   u.hash = '';
   u.username = '';
   u.password = '';
@@ -124,7 +126,7 @@ export function normalizeUrl(raw: string): NormalizeResult {
 
   if (path.length > 1) path = path.replace(/\/+$/, '');
   if (path === '/') path = '';
-  return { ok: true, url: `https://${host}${path}${query}` };
+  return { ok: true, url: `https://${host}${path}${query}${jobDivaRoute}` };
 }
 
 /** Split pasted text into link candidates: one per line, also tolerating spaces/commas between links. */

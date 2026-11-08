@@ -58,7 +58,7 @@ interface ActiveRun {
 
 let current: ActiveRun | null = null;
 
-async function pool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
+export async function pool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
   let i = 0;
   const workers = Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, async () => {
     while (i < items.length) await fn(items[i++]);

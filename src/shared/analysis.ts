@@ -23,7 +23,7 @@ export type AnalyzeParamsInput = z.input<typeof AnalyzeParamsSchema>;
 // ---- Estimate -------------------------------------------------------------------------------
 
 export interface TaskEstimate {
-  task: 'job_extraction' | 'pre_score' | 'matching';
+  task: 'job_extraction' | 'pre_score' | 'matching' | 'resume_tailor';
   calls: number;
   model: string | null;
   /** Average tokens per call used for the estimate. */

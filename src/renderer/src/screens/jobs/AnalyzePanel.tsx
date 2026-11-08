@@ -13,6 +13,8 @@ import { useConfirm } from '../../components/confirm';
 import DateRangePicker from '../../components/DateRangePicker';
 import type { Navigate } from '../../App';
 import { VERDICT_TONES, usd } from '../../components/format';
+import { FETCH_BLOCK_LABELS } from '@shared/sites';
+import HumanPassCard, { passWindows } from './HumanPassCard';
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -118,7 +120,7 @@ function RunPanel({ run, busy, onCancel, onResume }: { run: AnalyzeProgress; bus
               {plural(run.failed, 'item')} failed {showErrors ? '▾' : '▸'}
             </button>
           )}
-          {run.blocked > 0 && <span className="text-amber-700">{plural(run.blocked, 'item')} waiting (see "Needs manual paste")</span>}
+          {run.blocked > 0 && <span className="text-amber-700">{plural(run.blocked, 'item')} waiting (see "Needs you" / "Needs manual paste")</span>}
         </div>
         {running && run.active.length > 0 && <p className="text-xs text-slate-500">Working on: {run.active.join(' | ')}</p>}
         {showErrors && run.errors.length > 0 && (
@@ -212,7 +214,20 @@ function ResultsPreview({ rows, onOpenResults }: { rows: AnalysisRow[]; onOpenRe
   );
 }
 
-function NeedsPasteCard({ jobs, profiles, onPaste, onChanged }: { jobs: NeedsPasteJob[]; profiles: ProfileSummary[]; onPaste: (j: JobListItem) => void; onChanged: () => void }) {
+function NeedsPasteCard({
+  jobs,
+  profiles,
+  onPaste,
+  onChanged,
+  running,
+}: {
+  jobs: NeedsPasteJob[];
+  profiles: ProfileSummary[];
+  onPaste: (j: JobListItem) => void;
+  onChanged: () => void;
+  /** An analysis is running (the human pass waits for it). */
+  running: boolean;
+}) {
   const domains = useIpc('analyze:unreadableDomains', {}, [jobs.length]);
   const retry = useAction();
   const action = useAction();
@@ -327,6 +342,11 @@ function NeedsPasteCard({ jobs, profiles, onPaste, onChanged }: { jobs: NeedsPas
                     {j.title ?? j.url?.replace(/^https:\/\//, '') ?? 'Untitled description'}
                   </JobLink>
                   {j.companyName && <span className="font-normal text-slate-500"> · {j.companyName}</span>}
+                  {j.fetchBlock && (
+                    <span className="ml-2" title="Also waiting in &quot;Needs you&quot; — pass the check or sign in there">
+                      <Badge tone="amber">{FETCH_BLOCK_LABELS[j.fetchBlock]}</Badge>
+                    </span>
+                  )}
                 </div>
                 <div className="truncate text-xs text-amber-700" title={j.fetchError ?? ''}>
                   {j.fetchError}
@@ -339,6 +359,20 @@ function NeedsPasteCard({ jobs, profiles, onPaste, onChanged }: { jobs: NeedsPas
                   </div>
                 )}
               </div>
+              {j.fetchBlock && (
+                <Button
+                  size="sm"
+                  disabled={running || action.busy}
+                  title={
+                    running
+                      ? 'Wait for the analysis to finish reading the other links'
+                      : 'Open this link in a window to pass the check or sign in; the posting is read as soon as it shows (added to the pass if one is running)'
+                  }
+                  onClick={() => void action.run(() => invoke('sites:passStart', { jobIds: [j.id], windows: passWindows() }))}
+                >
+                  {j.fetchBlock === 'login' ? 'Sign in' : 'Pass check'}
+                </Button>
+              )}
               <Button size="sm" variant="primary" onClick={() => onPaste(j)}>
                 Paste description
               </Button>
@@ -744,7 +778,9 @@ export default function AnalyzePanel({
         />
       )}
 
-      {!selectionOnly && onPaste && needsPaste.data && needsPaste.data.length > 0 && <NeedsPasteCard jobs={needsPaste.data} profiles={profiles.data ?? []} onPaste={onPaste} onChanged={() => void needsPaste.reload()} />}
+      {!selectionOnly && <HumanPassCard disabled={running} />}
+
+      {!selectionOnly && onPaste && needsPaste.data && needsPaste.data.length > 0 && <NeedsPasteCard jobs={needsPaste.data} profiles={profiles.data ?? []} onPaste={onPaste} onChanged={() => void needsPaste.reload()} running={running} />}
 
       {children}
 

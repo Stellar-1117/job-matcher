@@ -8,11 +8,17 @@ import { deleteModel, listModels, upsertModel } from './repos/models';
 import { listRoutes, upsertRoute } from './repos/routes';
 import { createPromptVersion, listPrompts, setActivePrompt, updatePromptNotes } from './repos/prompts';
 import { addLinks, deleteJobs, getJobItem, listJobs } from './repos/jobs';
-import { addDescription, listNeedsPaste, listRunAnalyses, listUnreadableDomains, refetchJobs, resetAllUnreadable, resetFetch, savePastedText } from './repos/analysis';
+import { addDescription, listHumanQueue, listNeedsPaste, listRunAnalyses, listUnreadableDomains, refetchJobs, resetAllUnreadable, resetFetch, savePastedText } from './repos/analysis';
+import { humanPassState, skipHumanPassItem, startHumanPass, stopHumanPass } from './runs/humanPass';
+import { clearSiteSession, listSiteSessions, openSiteWindow } from './net/browser';
 import { analyzeState, cancelAnalyze, estimate, resumeAnalyze, startAnalyze } from './runs/analyze';
+import { estimateTailorRun, regenerateTailored, startTailor } from './runs/tailor';
+import { getTailoredDetail, getTailoredPdf, getTailoredToken } from './repos/tailored';
+import { resumeLink } from './net/resumeLink';
+import { resumeServerStatus, restartResumeServer } from './net/resumeServer';
 import { appEvents } from './events';
 import { exportRows, getResultDetail, listResults, markExported, setFeedback, setStatuses } from './repos/results';
-import { buildClipboardTable, buildExport, exportFileName } from '@shared/results';
+import { buildClipboardTable, buildExport, exportFileName, resumeFileName } from '@shared/results';
 import {
   createProfile,
   createResume,
@@ -50,7 +56,11 @@ export function registerIpc(dbPath: string): void {
     },
 
     'settings:get': () => getSettings(),
-    'settings:update': (patch) => updateSettings(patch),
+    'settings:update': async (patch) => {
+      const updated = updateSettings(patch);
+      if (patch.lan) await restartResumeServer();
+      return updated;
+    },
 
     'keys:list': () => listKeys(),
     'keys:set': (input) => {
@@ -238,6 +248,28 @@ export function registerIpc(dbPath: string): void {
     },
     'analyze:unreadableDomains': () => listUnreadableDomains(),
 
+    'sites:humanQueue': () => listHumanQueue(),
+    'sites:passState': () => humanPassState(),
+    'sites:passStart': ({ jobIds, windows }) => startHumanPass(jobIds, windows),
+    'sites:passSkip': ({ jobId }) => {
+      skipHumanPassItem(jobId);
+      return { ok: true };
+    },
+    'sites:passStop': () => {
+      stopHumanPass();
+      return { ok: true };
+    },
+    'sites:openSignIn': ({ url }) => {
+      if (!/^https?:\/\//i.test(url)) throw new Error('Only http(s) pages can be opened');
+      openSiteWindow(url, 'Job Matcher — sign in or sign up, then close this window (the session is kept)');
+      return { ok: true };
+    },
+    'sites:sessions': () => listSiteSessions(),
+    'sites:clear': async ({ domain }) => {
+      await clearSiteSession(domain);
+      return listSiteSessions();
+    },
+
     'usage:summary': ({ month }) => usageSummary(month, getSettings().monthlyBudgetUsd),
 
     'results:list': ({ profileId }) => listResults(profileId),
@@ -271,6 +303,34 @@ export function registerIpc(dbPath: string): void {
       markExported(profileId, exportedIds);
       return { exported: exportedIds.length, skipped, path, cancelled: false };
     },
+
+    'tailor:estimate': ({ profileId, jobIds }) => estimateTailorRun(profileId, jobIds),
+    'tailor:start': async ({ profileId, jobIds, budgetOverride }) => ({ started: (await startTailor({ profileId, jobIds, budgetOverride })).started }),
+    'tailor:regenerate': async ({ profileId, jobId }) => {
+      await regenerateTailored(profileId, jobId);
+      return { ok: true };
+    },
+    'tailor:download': async ({ profileId, jobId }) => {
+      const file = getTailoredPdf(jobId, profileId);
+      if (!file) throw new Error('This tailored resume has no PDF yet.');
+      const win = BrowserWindow.getFocusedWindow();
+      const opts = {
+        title: 'Save tailored resume',
+        defaultPath: join(app.getPath('documents'), resumeFileName(file.profileName)),
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      };
+      const res = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);
+      if (res.canceled || !res.filePath) return { path: null, cancelled: true };
+      await writeFile(res.filePath, file.pdf);
+      return { path: res.filePath, cancelled: false };
+    },
+    'tailor:link': ({ profileId, jobId }) => {
+      const token = getTailoredToken(jobId, profileId);
+      if (!token) throw new Error('This tailored resume has no PDF yet.');
+      return { link: resumeLink(token) };
+    },
+    'tailor:changes': ({ profileId, jobId }) => getTailoredDetail(jobId, profileId),
+    'tailor:server': () => resumeServerStatus(),
   };
 
   for (const channel of Object.keys(ipcContract) as IpcChannel[]) {
