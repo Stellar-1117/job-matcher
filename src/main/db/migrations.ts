@@ -416,6 +416,19 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: 11,
+    name: 'export_keeps_tailored',
+    up: (db) => {
+      // Exporting no longer turns Tailored jobs into Exported; restore the ones it already did.
+      db.exec(`
+        UPDATE job_profile_status SET status = 'tailored'
+        WHERE status = 'exported' AND EXISTS (
+          SELECT 1 FROM tailored_resumes t WHERE t.job_id = job_profile_status.job_id AND t.profile_id = job_profile_status.profile_id AND t.pdf_blob IS NOT NULL
+        )
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database, migrations: Migration[] = MIGRATIONS): number[] {

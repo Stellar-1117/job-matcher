@@ -679,7 +679,10 @@ export default function ResultsScreen({ navigate }: { navigate: Navigate }) {
           onDone={(ids, msg) => {
             setExporting(false);
             setNotice(msg);
-            patchRows(ids, { status: 'exported', exportedAt: new Date().toISOString() });
+            // Same rule as the main process: Tailored jobs stay Tailored.
+            const exportedAt = new Date().toISOString();
+            const set = new Set(ids);
+            setList((l) => (l ? { ...l, rows: l.rows.map((r) => (set.has(r.jobId) ? { ...r, exportedAt, status: r.status === 'tailored' ? r.status : 'exported' } : r)) } : l));
           }}
         />
       )}

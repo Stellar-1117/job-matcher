@@ -132,16 +132,18 @@ describe('tailoring', () => {
     expect(usage.c).toBe(1);
   });
 
-  it('applied and rejected stay; a later export still sets exported', async () => {
-    const [a, b, c] = [addJob(profileId), addJob(profileId), addJob(profileId)];
+  it('applied and rejected stay; a later export keeps tailored', async () => {
+    const [a, b, c, d] = [addJob(profileId), addJob(profileId), addJob(profileId), addJob(profileId)];
     setStatuses(profileId, [a], 'applied');
     setStatuses(profileId, [b], 'rejected');
     await tailorOk([a, b, c]);
     expect(getStatus(profileId, a)).toBe('applied');
     expect(getStatus(profileId, b)).toBe('rejected');
     expect(getStatus(profileId, c)).toBe('tailored');
-    markExported(profileId, [c]);
-    expect(getStatus(profileId, c)).toBe('exported');
+    markExported(profileId, [c, d]);
+    expect(getStatus(profileId, c)).toBe('tailored');
+    expect(getStatus(profileId, d)).toBe('exported');
+    expect(listResults(profileId).rows.find((r) => r.jobId === c)?.exportedAt).not.toBeNull();
     expect(getTailoredSummary(c, profileId)?.state).toBe('ready');
   });
 

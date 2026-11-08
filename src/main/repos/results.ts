@@ -201,11 +201,14 @@ export function markTailored(profileId: number, jobId: number, now = nowIso()): 
   return getStatus(profileId, jobId);
 }
 
+/** Exported jobs become Exported, except Tailored ones: they stay Tailored, and the export date is still recorded. */
 export function markExported(profileId: number, jobIds: number[], now = nowIso()): void {
   const db = getDb();
   const stmt = db.prepare(
     `INSERT INTO job_profile_status (job_id, profile_id, status, exported_at, updated_at) VALUES (?, ?, 'exported', ?, ?)
-     ON CONFLICT(job_id, profile_id) DO UPDATE SET status = 'exported', exported_at = excluded.exported_at, updated_at = excluded.updated_at`,
+     ON CONFLICT(job_id, profile_id) DO UPDATE SET
+       status = CASE WHEN status = 'tailored' THEN status ELSE 'exported' END,
+       exported_at = excluded.exported_at, updated_at = excluded.updated_at`,
   );
   db.transaction(() => {
     for (const id of jobIds) stmt.run(id, profileId, now, now);
